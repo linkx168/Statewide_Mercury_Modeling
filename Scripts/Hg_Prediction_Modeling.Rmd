@@ -1,0 +1,219 @@
+---
+title: "Hg_Prediction_Modeling"
+author: "Denver Link"
+date: "2024-02-27"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#To do:
+-think about how to transform and appropriately scale terms
+
+#Library
+```{r}
+library(tidyverse)
+library(arrow)
+library(LAGOSNE)
+library(mwlaxeref)
+library(mnsentinellakes)
+library(data.table)
+library(corrplot)
+library(performance)
+library(brms)
+library(lme4)
+```
+
+#Data
+```{r}
+#mercury data
+hg <- read_csv("Data/allfish_data_20231102_IT.csv") %>% 
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  filter(DOWID != "16000100") %>% 
+  local_to_nhdhr(from_colname = "DOWID", states = "mn")  %>% 
+  select(SAMPLENO,
+         WATERWAY,
+         TYPE,
+         LOCATION,
+         DOWID,
+         nhdhr.id,
+         DATECOL2,
+         YEARCOLL,
+         SPEC,
+         ANATHG,
+         NOFISH,
+         LGTHIN,
+         WTLB,
+         AGE,
+         SEX,
+         HGPPM,
+         HGCODE,
+         HGLAB,
+         HGCMMT) %>% 
+  rename(nhdid = nhdhr.id,
+         DOW = DOWID)
+
+#connection to covariates
+dnr_covary <- read_csv("Data/MN_lakes_watershed_lulc_fromDNR.csv")
+
+scaled_dnr <- dnr_covary %>% 
+  mutate_at(vars(Total_Pasture_Hay_Hectares:WS_Lake_Ratio), scale) %>% 
+   rename_with(~ paste0("scaled_", .), Total_Pasture_Hay_Hectares:WS_Lake_Ratio)
+
+dnr_covary <- dnr_covary %>% 
+  left_join(scaled_dnr)
+glimpse(dnr_covary)
+
+hg <- hg %>% 
+  left_join(dnr_covary)
+
+#connection to glm
+glm <- read_csv("Data/glm_lake_metadata.csv") %>% 
+  filter(state == "MN") %>% 
+  rename(nhdid = site_id) %>% 
+  mutate(clarity = case_when(is.infinite(clarity) ~ NA,
+                             TRUE ~ clarity)) %>% 
+  mutate(scaled_clarity = case_when(!is.na(clarity) ~ scale(clarity),
+                                    TRUE ~ clarity))
+
+glimpse(glm)
+
+hg <- hg %>% 
+  left_join(glm) %>% 
+  mutate(across(starts_with("scaled_"), as.vector))
+glimpse(hg)
+
+#data for modeling
+hg.model <- hg %>% 
+  select(WATERWAY,
+         TYPE,
+         DOW,
+         nhdid,
+         DATECOL2,
+         YEARCOLL,
+         SPEC,
+         ANATHG,
+         NOFISH,
+         LGTHIN,
+         HGPPM,
+         Total_Wetland_Hectares,
+         scaled_Total_Wetland_Hectares,
+         Percent_Wetland,
+         scaled_Percent_Wetland,
+         WS_Lake_Ratio,
+         scaled_WS_Lake_Ratio,
+         centroid_lat,
+         centroid_lon,
+         max_depth,
+         area,
+         elevation,
+         clarity,
+         scaled_clarity)
+write_csv(hg.model, "hg_model.csv")
+```
+
+#Simple model approach to explore trends
+```{r}
+#how many samples have the data we need?
+hg.model.filtered <- hg.model %>% 
+  filter(TYPE == "Lake") %>% 
+  filter(!(is.na(DOW) |
+             is.na(ANATHG) |
+             is.na(YEARCOLL) |
+             is.na(LGTHIN) |
+             is.na(Total_Wetland_Hectares)|
+             is.na(Percent_Wetland) |
+             is.na(WS_Lake_Ratio) |
+             is.na(centroid_lat) |
+             is.na(area) |
+             is.na(clarity))) %>% 
+  mutate(year = as.character(YEARCOLL)) %>% 
+  mutate(log.hg = log(HGPPM))
+summary(hg.model.filtered)
+
+wae <- hg.model.filtered %>% 
+  filter(SPEC == "WAE")
+
+#even simpler 
+fit.1 <- glmer(HGPPM ~ LGTHIN + Percent_Wetland + WS_Lake_Ratio + clarity + (1|year) + (1|DOW),
+              data = wae,
+              family = lognormal())
+summary(fit.1)
+
+
+#specifying model - starting with only walleye
+fit.1 <- brm(HGPPM ~ LGTHIN + Percent_Wetland + WS_Lake_Ratio + clarity + (1|year) + (1|DOW),
+             data = hg.model.filtered %>% filter(SPEC == "WAE"),
+             family = lognormal(),
+             iter = 10000,
+             warmup = 1000)
+
+summary(fit.1)
+plot(fit.1)
+plot(conditional_effects(fit.1))
+
+fit.1 %>%
+  spread_draws(b_Intercept, r_year[year,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
+  ggplot(aes(y = as.factor(year), x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+```
+
+#Old code
+```{r}
+################linking to lagos data############
+#load all lagos data
+lagos <- lagosne_load()
+#extract data relavent to Hg
+#epi_nutr contains limno parameters of interest - espically carbon
+#hu12 conn gives watershed level paramters for wetlends
+#huc12 lulc gives parameters for watershed level landcover
+#state gives state level parameters
+#filter for just MN lakes 
+lg <- left_join(lagos$epi_nutr, lagos$locus)
+lg <- left_join(lg, lagos$hu12.conn)
+lg <- left_join(lg, lagos$hu12.lulc)
+lg <- left_join(lg, lagos$state)
+lg.sum <- lg %>% 
+  filter(state == "MN") %>% 
+  select(state,
+         state_name,
+         sampledate,
+         nhdid,
+         hu12_zoneid,
+         gnis_name,
+         nhd_lat,
+         nhd_long,
+         lake_area_ha,
+         lake_perim_meters,
+         doc,
+         doc_qual,
+         doc_censorcode,
+         doc_detectionlimit,
+         doc_labmethodname,
+         toc,
+         toc_qual,
+         toc_censorcode,
+         toc_detectionlimit,
+         toc_labmethodname,
+         secchi,
+         secchi_qual,
+         secchi_censorcode,
+         secchi_methodinfo,
+         hu12_nlcd2011_pct_90,
+         hu12_nlcd2011_ha_90,
+         hu12_nlcd2011_pct_95,
+         hu12_nlcd2011_ha_95) %>% 
+  group_by(nhdid) %>% 
+  summarise(meanDOC = mean(doc, na.rm = T),
+            meanTOC = mean(toc, na.rm = T),
+            meanSECCHI = mean(secchi, na.rm = T),
+            mean95 = mean(hu12_nlcd2011_pct_95, na.rm = T),
+            mean90 = mean(hu12_nlcd2011_pct_90, na.rm = T),
+            meanAREA = mean(lake_area_ha, na.rm = T))
+
+#joining to Hg data
+hg.lg <- left_join(hg, lg.sum)
+```
+

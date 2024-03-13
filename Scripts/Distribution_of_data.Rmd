@@ -1,0 +1,824 @@
+---
+title: "Distribution_of_Data"
+author: "Denver Link"
+date: "2024-01-16"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Things to think about:
+-when looking at the lake level I run the distinct function to get lakes that have at least 1 hg sample
+   - maybe include a filter for lakes that have a certain amount of samples or sampling year?
+-ecoregion proportion of samples
+-I got a prop of samples from each area but the column is not clean so I have to concider aggregating names
+-get counts of samples before and after change of sampling 
+  -figure out when they stopped aggregating data by length
+   
+Find below:
+1. Exploration within the hg data 
+2. linking lagos data to hg data and exploring trends in various WQ parameters in lakes sampled and unsampled for hg
+     -plot of area, chla, nh4, tp, doc
+     -WQ parameters were an average value of the past 20 years and some do not have great coverage 
+3. linking to glm data and exploring trends in various WQ parameters in lakes sampled and unsampled for hg
+    -area, max depth, stratification, summer and winter temps
+    -counts of lakes that have been sampled and unsampled for hg
+
+# Library
+```{r}
+library(tidyverse)
+library(arrow)
+library(LAGOSNE)
+library(mwlaxeref)
+library(mnsentinellakes)
+library(data.table)
+library(corrplot)
+library(performance)
+```
+
+# Data
+```{r}
+#contaminate data
+hg <- read_csv("Data/allfish_data_20231102_IT.csv") %>% 
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  filter(DOWID != "16000100") #remove lake superior 
+
+hg <- local_to_nhdhr(hg, from_colname = "DOWID", states = "mn")  %>% 
+  mutate(nhdhr.id = str_replace(nhdhr.id, "nhdhr_", "")) %>%
+  select(SAMPLENO,
+         WATERWAY,
+         TYPE,
+         LOCATION,
+         DOWID,
+         nhdhr.id,
+         DATECOL2,
+         YEARCOLL,
+         SPEC,
+         ANATHG,
+         NOFISH,
+         LGTHIN,
+         WTLB,
+         AGE,
+         SEX,
+         HGPPM,
+         HGCODE,
+         HGLAB,
+         HGCMMT)
+
+hg %>% 
+  distinct(DOWID, nhdhr.id) %>% 
+  filter(is.na(nhdhr.id)) %>% 
+  group_by(DOWID) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#28 unmatched lakes 
+
+#fish of the sample species sample from the sample lake?
+```
+
+#exploartion within hg data 
+```{r}
+hg_explore <- read_csv("Data/allfish_data_20231102_IT.csv") %>% 
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
+  mutate(DOWID = fixlakeid(DOWID)) 
+
+#generally how many samples per lake?
+hg_explore %>% 
+  group_by(DOWID, YEARCOLL, SPEC) %>% 
+  filter(SPEC %in% c("BLC", "WAE", "NOP", "LMB", "SMB", "WTS", "CIS", "CAP")) %>% 
+  count() %>% 
+  ggplot() +
+  geom_histogram(aes(YEARCOLL)) +
+  facet_wrap(~ SPEC, scales = "free")
+#on this plot, each dot is a lake within a year - this shows the general number of samples collected in a lake over time
+ggsave("timing_of_samples.png", width = 7, height = 7)
+
+hg_explore %>% 
+  group_by(DOWID, YEARCOLL, SPEC) %>% 
+  filter(SPEC %in% c("BLC", "WAE", "NOP", "LMB", "SMB", "WTS", "CIS", "CAP")) %>% 
+  count() %>% 
+  group_by(DOWID, SPEC) %>% 
+  count() %>% 
+  ggplot() +
+  geom_histogram(aes(n)) +
+  facet_wrap(~ SPEC, scales = "free")
+#distribution of how many years a lake has been sampled
+ggsave("lake_year_counts.png", width = 7, height = 7)
+
+hg_explore %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  group_by(AREANEW) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#number of lakes that have been sampled within each area
+
+hg_explore %>% 
+  group_by(AREANEW) %>% 
+  summarise(n = n())  %>% 
+  mutate(prop = n /sum(n)) %>%
+  mutate(sum(prop)) %>% 
+  print(n = nrow(.)) 
+
+#any muskie??? there is a statewide recommendation not to eat
+hg_explore %>% 
+  group_by(SPEC) %>% 
+  count() %>% 
+  arrange(SPEC) %>% 
+  print(n = nrow(.))
+
+hg_explore %>% 
+  filter(SPEC == "MUE") %>% 
+  group_by(DOWID, YEARCOLL) %>% 
+  arrange(YEARCOLL) %>% 
+  summarise(mean.length = mean(LGTHIN), sd.length = sd(LGTHIN), mean.hg = mean(HGPPM), sd.hg = sd(HGPPM), n = n())
+
+hg_explore %>% 
+  filter(SPEC == "MUE") %>% 
+  distinct(YEARCOLL)
+
+hg_explore %>% 
+  filter(SPEC == "MUE") %>% 
+  distinct(DOWID)
+#whoa a statewide rec not to eat MUE based on 56 total fish caught from 13 lakes in 12 years
+
+###########LOD?###########
+#Codes - M mean of two or more results, K - less than specified reporting limit
+hg %>% 
+  group_by(HGCODE) %>% 
+  count()
+
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  group_by(WATERWAY) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#97 lakes represented
+
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  group_by(YEARCOLL) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#wide spread of years represented
+
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  group_by(SPEC) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#Large range of speices represnted
+
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  group_by(WATERWAY, YEARCOLL, SPEC) %>% 
+  summarise(min.length = min(LGTHIN), 
+            med.length = median(LGTHIN), 
+            max.length = max(LGTHIN),
+            n = n()) %>% 
+  print(n = nrow(.))
+
+#how many unique sampling efforts?
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  distinct(WATERWAY, YEARCOLL, SPEC) %>% 
+  glimpse()
+
+#what is the limit dected?
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  group_by(HGPPM) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#looks like it is generally .01-.05 but there might be some erroneous values? .551 certainly is not a limit of detection
+
+#has this dection limit changed over time?
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  group_by(YEARCOLL, HGPPM) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#it appears most of the erroneus values are from 2022 - sometimes there is variation in the LOD within a year even
+
+hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  group_by(HGPPM, HGCMMT) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+#where have these samples been process?
+hg %>% 
+  group_by(HGLAB) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#not great info on where samples were processed but in general we know from agency communication 
+
+#are there other samples of the same species collected when LOD samples were?
+lod <- hg %>% 
+  filter(str_detect(HGCODE, "K")) %>% 
+  select(WATERWAY, YEARCOLL, SPEC)
+
+all_with_lod <- lod %>% 
+  left_join(hg)
+
+all_with_lod %>% 
+  group_by(WATERWAY, YEARCOLL, SPEC, HGCODE) %>% 
+  summarise(min.length = min(LGTHIN), 
+            med.length = median(LGTHIN), 
+            max.length = max(LGTHIN),
+            n = n()) %>%
+  print(n = nrow(.))
+
+all_with_lod %>% 
+  group_by(WATERWAY, YEARCOLL, SPEC, HGCODE) %>% 
+  count() %>% 
+  group_by(WATERWAY, YEARCOLL, SPEC) %>% 
+  count() %>% 
+  ungroup() %>% 
+  summarise(no.other = sum(n == "1"),
+            other.samples = sum(n > 1))
+#looks like many times there are samples from the same species/lake/year with and without hitting the LOD (but not always)
+#roughly half of the distinct lake/year/spec have non-lod samples with them
+
+
+#any suspected issues?
+hg %>% 
+  group_by(HGCMMT) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#looks like it is mostly just telling where samples were process 
+#there is a comment about some values being potential errors (11)
+
+hg %>% 
+  filter(str_detect(HGCMMT, "ERRORS")) %>% 
+  group_by(WATERWAY, YEARCOLL, SPEC) %>% 
+  count()
+#all error values come from Green lake in 2011
+
+
+
+#tissue type 
+#first we have to figure out if there are any SPEC-LAKE-Year combos of similar length for sample types. Ideally these combos would compare skin on vs off
+hg_explore %>% 
+  group_by(ANATHG) %>% 
+  count()
+
+samples <- hg_explore %>% 
+  filter(SPEC %in% c("WAE", "NOP")) %>% 
+  filter(ANATHG %in% c("BIOPSY", "BIOPSYSK", "FILET", "FILSK")) %>% 
+  group_by(SPEC, DOWID, YEARCOLL, ANATHG) %>% 
+  count() %>% 
+  group_by(SPEC, DOWID, YEARCOLL) %>% 
+  count() %>% 
+  filter(n >1) %>% 
+  print(n = nrow(.))
+
+hg_explore %>% 
+  filter(SPEC == "WAE" & YEARCOLL == "2018" & DOWID == "70005400") %>% 
+  select(WATERWAY, DOWID, SPEC, YEARCOLL, ANATHG, LGTHIN, HGPPM) %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, HGPPM, color = ANATHG)) +
+  geom_smooth(aes(LGTHIN, HGPPM, color = ANATHG))
+
+hg_explore %>% 
+  filter(SPEC %in% samples$SPEC & DOWID %in% samples$DOWID & YEARCOLL %in% samples$YEARCOLL) %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, HGPPM, shape = as.factor(YEARCOLL), color = ANATHG)) +
+  geom_smooth(aes(LGTHIN, HGPPM, color = ANATHG)) +
+  facet_grid(SPEC ~ DOWID, scales = "free")
+#it doesn't appear we have a good sense of skin on and off in these data becuase there are no good combos of spec-lake-year at a similar length
+#we will likely have to make a call based on previous research if we feel skin on/off is important
+```
+
+#hg correlation for each species
+```{r}
+hg_explore <- read_csv("Data/allfish_data_20231102_IT.csv") %>% 
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  filter(DOWID != "16000100")
+
+length.correction <- hg_explore %>% 
+  group_by(SPEC) %>% 
+  mutate(mean.length = mean(LGTHIN)) %>% 
+  ungroup() %>% 
+  mutate(hg.len = HGPPM/LGTHIN) %>% #dividing fish Hg by length
+  group_by(DOWID, SPEC) %>%
+  mutate(hg.len.bar = sum(hg.len*NOFISH)/sum(NOFISH)) %>% #weights by the number of fish per sample to get average HgLen for lake and year
+  mutate(SPFHG = mean.length*hg.len.bar) #multiplying by the standard fish length by HgLen to calculate the standard fish mercury concentration
+
+length.correction.check <- length.correction %>% 
+  ungroup() %>% 
+  select(SAMPLENO, WATERWAY, YEARCOLL, SPEC, NOFISH, LGTHIN, HGPPM, hg.len, hg.len.bar, SPFHG, mean.length)
+
+stnd <- length.correction %>% 
+  distinct(DOWID, SPEC, SPFHG) %>% 
+  pivot_wider(id_cols = DOWID,
+              names_from = SPEC,
+              values_from = SPFHG) 
+
+glimpse(stnd)
+
+#all at once
+corplot.dat <- stnd %>% 
+  ungroup() %>% 
+  select(-DOWID)
+glimpse(corplot.dat)
+corrplot(corplot.dat, method = "number")
+
+corplot.dat_clean <- corplot.dat[rowSums(is.na(corplot.dat)) < ncol(corplot.dat),]
+cor_matrix <- cor(corplot.dat_clean, use = "pairwise.complete.obs")
+
+# Convert correlation matrix to long format
+cor_long <- melt(cor_matrix)
+# Remove rows with NA correlation values
+cor_long <- cor_long[complete.cases(cor_long), ]
+
+# Plot correlation for each unique combination of species
+ggplot(cor_long, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(high = munsell::mnsl("5P 2/12"), low = munsell::mnsl("5P 7/12"))+
+  theme_minimal() +
+  labs(title = "Correlation between Species",
+       x = "Species 1",
+       y = "Species 2")  +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+#selecting species with sufficent sample size/game fish species
+cor_matrix_plot <- cor(corplot.dat_clean %>% 
+                         select(NOP, WAE, SMB, LMB, BLG, WTS, CAP, YEP, BLC, CCF, CIS, TLC), use = "pairwise.complete.obs")
+
+cor_long %>% 
+  filter(Var1 %in% c("NOP", "WAE", "SMB", "LMB", "BLG", "WTS", "CAP", "YEP", "BLC", "CCF", "CIS", "TLC"),
+         Var2 %in% c("NOP", "WAE", "SMB", "LMB", "BLG", "WTS", "CAP", "YEP", "BLC", "CCF", "CIS", "TLC"),
+         value > 0) %>% 
+  mutate(value_2 = round(value, 2)) %>% 
+ggplot(aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(high = munsell::mnsl("5P 2/12"), low = munsell::mnsl("5P 7/12"))+
+  geom_text(aes(Var2, Var1, label = value_2), color = "black", size = 4) +
+  theme_minimal() +
+  labs(title = "Correlation between Species",
+       x = "Species 1",
+       y = "Species 2")
+
+#a few lm models
+fit.1 <- lm(WAE ~ NOP, data = stnd)
+summary(fit.1)
+plot(fit.1)
+
+fit.2 <- lm(BLC ~ NOP, data = stnd)
+summary(fit.2)
+plot(fit.2)
+
+#correlation plots
+stnd %>% 
+  filter(!is.na(NOP) & !is.na(WAE)) %>% 
+  ggplot() +
+  geom_point(aes(NOP, WAE)) +
+  geom_smooth(aes(NOP, WAE), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(TLC) & !is.na(CAP)) %>% 
+  ggplot() +
+  geom_point(aes(TLC, CAP)) +
+  geom_smooth(aes(TLC, CAP), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(TLC) & !is.na(SMB)) %>% 
+  ggplot() +
+  geom_point(aes(TLC, SMB)) +
+  geom_smooth(aes(TLC, SMB), se = F, method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(CIS) & !is.na(WTS)) %>% 
+  ggplot() +
+  geom_point(aes(CIS, WTS)) +
+  geom_smooth(aes(CIS, WTS), se = F, method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(NOP) & !is.na(CAP)) %>% 
+  ggplot() +
+  geom_point(aes(NOP, CAP)) +
+  geom_smooth(aes(NOP, CAP), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(BLG) & !is.na(CAP)) %>% 
+  ggplot() +
+  geom_point(aes(BLG, CAP)) +
+  geom_smooth(aes(BLG, CAP), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(NOP) & !is.na(WAE)) %>% 
+  ggplot() +
+  geom_point(aes(WAE, NOP)) +
+  geom_smooth(aes(WAE, NOP), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(TLC) & !is.na(SUN)) %>% 
+  ggplot() +
+  geom_point(aes(TLC, SUN)) +
+  geom_smooth(aes(TLC, SUN), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(NOP) & !is.na(WAE)) %>% 
+  ggplot() +
+  geom_point(aes(NOP, WAE)) +
+  geom_smooth(aes(NOP, WAE), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+
+stnd %>% 
+  filter(!is.na(NOP) & !is.na(BLG)) %>% 
+  ggplot() +
+  geom_point(aes(NOP, BLG)) +
+  geom_smooth(aes(NOP, BLG), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(NOP) & !is.na(WTS)) %>% 
+  ggplot() +
+  geom_point(aes(NOP, WTS)) +
+  geom_smooth(aes(NOP, WTS), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(NOP) & !is.na(BLC)) %>% 
+  ggplot() +
+  geom_point(aes(NOP, BLC)) +
+  geom_smooth(aes(NOP, BLC), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(CCF) & !is.na(YEP)) %>% 
+  ggplot() +
+  geom_point(aes(CCF, YEP)) +
+  geom_smooth(aes(CCF, YEP), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(CCF) & !is.na(NOP)) %>% 
+  ggplot() +
+  geom_point(aes(CCF, NOP)) +
+  geom_smooth(aes(CCF, NOP), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+
+stnd %>% 
+  filter(!is.na(CCF) & !is.na(WAE)) %>% 
+  ggplot() +
+  geom_point(aes(CCF, WAE)) +
+  geom_smooth(aes(CCF, WAE), method = lm) +
+  geom_abline(intercept = 0, slope = 1, color = "red")
+```
+
+#linking data to lagos
+```{r}
+#lagos
+lagos <- lagosne_load()
+lg <- left_join(lagos$epi_nutr, lagos$locus)
+lg <- left_join(lg, lagos$state)
+lg <- filter(lg, !is.na(state))
+
+#lagos in mn selecting some variables of interest
+lg_mn <- lg %>% 
+  filter(state == "MN") %>% 
+  mutate(YEARCOLL = year(sampledate)) %>% 
+  rename(nhdhr.id = nhdid) %>% 
+  group_by(nhdhr.id) %>% 
+  summarise(mean.chla = mean(chla),
+            mean.dkn = mean(dkn),
+            mean.doc = mean(doc),
+            mean.nh4 = mean(nh4),
+            mean.tp = mean(tp),
+            lake_area_ha = mean(lake_area_ha)) 
+
+lg_hg <- hg %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  full_join(lg_mn, by = c("nhdhr.id")) %>% 
+    select(WATERWAY,
+           TYPE,
+           LOCATION,
+           DOWID,
+           nhdhr.id,
+           HGPPM,
+           mean.chla,
+           mean.doc,
+           mean.nh4,
+           mean.tp,
+           lake_area_ha) %>% 
+  mutate(hg_sampled = case_when(is.na(HGPPM) ~ "N",
+                                TRUE ~ "Y"),
+         log_area = log(lake_area_ha),
+         log_tp = log(mean.tp),
+         log_nh4 = log(mean.nh4),
+         log_mean.chla = log(mean.chla)) %>% 
+   pivot_longer(names_to = "metric",
+               values_to = "value",
+               cols = c("mean.chla",
+                        "mean.nh4",
+                        "mean.tp",
+                        "mean.doc",
+                        "lake_area_ha",
+                        "log_area",
+                        "log_tp",
+                        "log_nh4",
+                        "log_mean.chla"))
+
+lg_hg %>% 
+  ggplot() +
+  geom_jitter(aes(hg_sampled, value, color = hg_sampled)) +
+  geom_violin(aes(hg_sampled, value), alpha = .5) +
+  facet_wrap(~metric, scales = "free")
+
+ggsave("lago_lake_chem.png", width = 7, height = 7)
+
+lg_hg %>% 
+  filter(value != "Inf") %>%
+  filter(value != "-Inf") %>% 
+  group_by(metric, hg_sampled) %>% 
+  summarise(min = min(value, na.rm = T),
+            median = median(value, na.rm = T),
+            max = max(value, na.rm = T))
+
+#how many samples of each?
+lg_hg %>% 
+  distinct(nhdhr.id, .keep_all = T) %>% 
+  group_by(hg_sampled) %>% 
+  count()
+
+lg_hg %>% 
+  mutate(metric_sampled = case_when(is.na(value) ~ "N",
+                                    TRUE ~ "Y")) %>% 
+  group_by(metric, metric_sampled) %>% 
+  count()
+```
+
+#linking to temp data
+```{r}
+glm <- read_csv("Data/glm_lake_metadata.csv") %>% 
+  filter(state == "MN") %>% 
+  mutate(nhdhr.id = str_replace(site_id, "nhdhr_", "")) %>% 
+  select(nhdhr.id,
+         max_depth,
+         area,
+         elevation,
+         clarity)
+
+
+glm_2 <- read_feather(file.path("C:", "Users", "linkx168", "Documents", "Hg_Project", "Data", "lake_temperature_metrics_GLM_NLDAS.feather")) %>% 
+  mutate(nhdhr.id = str_replace(site_id, "nhdhr_", "")) %>% 
+  select(nhdhr.id,
+         year, 
+         peak_temp,
+         stratification_duration,
+         mean_surf_jul,
+         mean_surf_dec) %>% 
+  filter(year >= 2000) %>% 
+  group_by(nhdhr.id) %>% 
+  summarise(mean_surf_dec = mean(mean_surf_dec),
+            mean_surf_jul = mean(mean_surf_jul),
+            mean_peak_temp = mean(peak_temp),
+            mean_strat_dur = mean(stratification_duration))
+```
+
+#sampled and unsampled lakes
+```{r}
+hg_clean <- hg %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  left_join(lg_mn, by = c("nhdhr.id"))
+
+#glm data exploration
+hg_glm <- hg %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  full_join(glm, by = c("nhdhr.id")) %>% 
+  mutate(hg_sampled = case_when(is.na(HGPPM) ~ "N",
+                                TRUE ~ "Y"),
+         log_area = log(area),
+         log_clarity = log(clarity))
+
+hg_glm_long <- hg %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  full_join(glm, by = c("nhdhr.id")) %>% 
+  mutate(hg_sampled = case_when(is.na(HGPPM) ~ "N",
+                                TRUE ~ "Y"),
+         log_area = log(area),
+         log_clarity = log(clarity),
+         log_max_depth = log(max_depth)) %>% 
+  pivot_longer(names_to = "metric",
+               values_to = "value",
+               cols = c("HGPPM", 
+                        "area",
+                        "elevation",
+                        "clarity",
+                        "log_area",
+                        "log_clarity",
+                        "max_depth",
+                        "log_max_depth")) 
+
+hg_glm_long %>% 
+  ggplot() +
+  geom_violin(aes(hg_sampled, value)) +
+  facet_wrap(~metric, scales = "free")
+
+hg_glm_long %>% 
+  filter(value != "Inf") %>%
+  group_by(metric, hg_sampled) %>% 
+  summarise(min = min(value, na.rm = T),
+            median = median(value, na.rm = T),
+            max = max(value, na.rm = T))
+
+#general exploration of data
+hg_glm %>% 
+  group_by(hg_sampled) %>% 
+  count()
+#roughly 1433/14709 lakes have been sampled for hg
+
+
+#glm2
+hg_glm2_long <- hg %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  full_join(glm_2, by = c("nhdhr.id")) %>% 
+  mutate(hg_sampled = case_when(is.na(HGPPM) ~ "N",
+                                TRUE ~ "Y")) %>% 
+  pivot_longer(names_to = "metric",
+               values_to = "value",
+               cols = c("mean_surf_dec",
+                        "mean_surf_jul",
+                        "mean_peak_temp",
+                        "mean_strat_dur")) 
+hg_glm2_long %>% 
+  ggplot() +
+  geom_violin(aes(hg_sampled, value)) +
+  facet_wrap(~metric, scales = "free")
+ggsave("lake_temp_diff.png", width = 7, height = 7)
+
+hg_glm2_long %>% 
+  filter(value != "Inf") %>%
+  group_by(metric, hg_sampled) %>% 
+  summarise(min = min(value, na.rm = T),
+            median = median(value, na.rm = T),
+            max = max(value, na.rm = T))
+
+#cumulative frequency 
+sampled_lakes <- hg_glm %>% 
+  filter(hg_sampled == "Y") %>% 
+  arrange(log_area) %>% 
+  mutate(row_number = row_number(),
+         percentile = log_area/row_number) 
+
+hg_glm <- hg_glm %>% 
+  mutate(row_number = row_number(),
+         percentile = log_area/row_number)
+
+ggplot() +
+  geom_density(data = hg_glm, aes(log_area, fill = "population"), alpha = 0.5) +
+  geom_density(data = sampled_lakes, aes(log_area, fill = "sampled"), alpha = 0.5) +
+  theme_minimal()
+
+ggplot() +
+  geom_histogram(data = hg_glm, aes(log_area, fill = "population"),bins = 100, alpha = 0.5) +
+  geom_histogram(data = sampled_lakes, aes(log_area, fill = "sampled"), bins = 100, alpha = 0.5) 
+ggsave("count_population_sampled_area.png", width = 7, height = 7)
+
+
+ggplot() +
+  geom_point(data = hg_glm, aes(x = log_area, y = percentile, color = "Population"), size = 1.5, alpha = .5) +
+  geom_point(data = sampled_lakes, aes(x = log_area, y = percentile, color = "Sampled"), size = 1.5, alpha = .5) +
+  geom_smooth(data = hg_glm, aes(x = log_area, y = percentile, color = "Population"), size = 1.5) +
+  geom_smooth(data = sampled_lakes, aes(x = log_area, y = percentile, color = "Sampled"), size = 1.5) +
+  labs(title = "Cumulative Frequency of Log Area",
+       x = "Log-transformed Area",
+       y = "Cumulative Frequency") +
+  scale_color_manual(values = c("blue", "red")) +
+  theme_minimal()
+```
+
+#Connecting data to ZM
+```{r}
+zm <- read_csv("Data/ZM_MN_NHD.csv") %>% 
+  rename(DOWID = DOW) %>% 
+  mutate(DOWID = fixlakeid(DOWID)) 
+
+hg_zm <- hg %>% 
+  left_join(zm) %>% 
+  mutate(zm_lake = case_when(!is.na(Year_Infested) ~ "y",
+                             TRUE ~ "n"),
+         pre_post = case_when(YEARCOLL >= Year_Infested ~ "post",
+                              YEARCOLL < Year_Infested ~ "pre",
+                              TRUE ~ "never"))
+
+#summary stats on how many zm infested
+#419 zm lakes in mn
+
+hg_zm %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  group_by(zm_lake) %>% 
+  count()
+#213 zm lakes in the hg data 
+# 1247 uninvaded lakes
+
+#how many lakes have pre and post?
+hg_zm %>% 
+  filter(zm_lake == "y") %>%
+  distinct(DOWID, YEARCOLL, .keep_all = T) %>%
+  group_by(DOWID) %>% 
+  summarise(both_pre_post = n_distinct(pre_post)) %>% 
+  filter(both_pre_post >1) %>% 
+  count()
+#125 of the 214 zm lakes have pre and post data
+#pretty nifty buttt how many years of pre/post data?
+
+years_pre_post <- hg_zm %>% 
+  filter(zm_lake == "y") %>%
+  group_by(DOWID, pre_post) %>% 
+  summarise(years = n_distinct(YEARCOLL))
+
+hg_zm %>% 
+  filter(zm_lake == "y") %>%
+  group_by(DOWID, pre_post) %>% 
+  summarise(years = n_distinct(YEARCOLL)) %>% 
+  pivot_wider(id_cols = DOWID,
+              names_from = pre_post,
+              values_from = years) %>% 
+  filter(post >= 2 & pre >= 1) %>% 
+  select(pre, post)
+
+hg_zm %>% 
+  filter(zm_lake == "y") %>%
+  group_by(DOWID, pre_post) %>% 
+  summarise(years = n_distinct(YEARCOLL)) %>% 
+  pivot_wider(id_cols = DOWID,
+              names_from = pre_post,
+              values_from = years) %>% 
+  filter(is.na(pre))  %>% 
+  select(pre, post)
+
+years_pre_post %>% 
+  group_by(pre_post) %>% 
+  summarise(min = min(years),
+            mean = mean(years),
+            median = median(years),
+            max = max(years))
+
+years_pre_post %>% 
+  ggplot() +
+  geom_histogram(aes(years)) +
+  facet_wrap(~pre_post, scales = "free")
+#ouch... most lakes only have one year of post data and this isn't even getting to spec level 
+#35 lakes have at least 2 years of post and 1 year of pre
+#26 lakes have at least 2 years pre and post
+#only 11 lakes have more than 3 years post data and at least 1 pre
+
+#86 lakes have pre data but no post
+#2 lakes have post data but no pre
+
+#okay now we know ZM lake sampled for hg, but how might these samples be biased??
+
+#lagos
+lagos <- lagosne_load()
+lg <- left_join(lagos$epi_nutr, lagos$locus)
+lg <- left_join(lg, lagos$state)
+lg <- filter(lg, !is.na(state))
+
+#lagos in mn selecting some variables of interest
+lg_mn <- lg %>% 
+  filter(state == "MN") %>% 
+  mutate(YEARCOLL = year(sampledate)) %>% 
+  rename(nhdhr.id = nhdid) %>% 
+  group_by(nhdhr.id) %>% 
+  summarise(mean.chla = mean(chla),
+            mean.dkn = mean(dkn),
+            mean.doc = mean(doc),
+            mean.nh4 = mean(nh4),
+            mean.tp = mean(tp),
+            lake_area_ha = mean(lake_area_ha)) 
+
+lg_hg <- hg_zm %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  full_join(lg_mn, by = c("nhdhr.id"))
+
+lg_hg %>%
+  distinct(DOWID, YEARCOLL, .keep_all = T) %>% 
+  mutate(log.area = log(lake_area_ha)) %>% 
+  ggplot() +
+  geom_violin(aes(x = zm_lake, y = log.area))
+```
+
+# trying joint species distribution model 
+```{r}
+library(Hmsc)
+```
+
