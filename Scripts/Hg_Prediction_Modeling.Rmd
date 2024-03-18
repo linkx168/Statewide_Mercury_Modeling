@@ -17,11 +17,16 @@ library(arrow)
 library(LAGOSNE)
 library(mwlaxeref)
 library(mnsentinellakes)
-library(data.table)
 library(corrplot)
 library(performance)
 library(brms)
 library(lme4)
+library(Matrix)
+library(car)
+library(tidybayes)
+library(rstanarm)
+library(bayesplot)
+library(loo)
 ```
 
 #Data
@@ -52,40 +57,63 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
          HGLAB,
          HGCMMT) %>% 
   rename(nhdid = nhdhr.id,
-         DOW = DOWID)
+         DOW = DOWID) %>% 
+  group_by(SPEC) %>% 
+  mutate(scaled_length = scale(LGTHIN)) %>% 
+  ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv"))
+dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+  mutate(logit_wetlands = logit(Percent_Wetland),
+         log_WS_Lake_Ratio = log(WS_Lake_Ratio)) 
 
-scaled_dnr <- dnr_covary %>% 
-  mutate_at(vars(Total_Pasture_Hay_Hectares:WS_Lake_Ratio), scale) %>% 
-   rename_with(~ paste0("scaled_", .), Total_Pasture_Hay_Hectares:WS_Lake_Ratio)
+dnr_covary %>% 
+  ggplot() +
+  geom_histogram(aes(scaled_logit_wetlands))
+
+dnr_covary %>% 
+  ggplot() +
+  geom_histogram(aes(log_WS_Lake_Ratio))
+
+scaled_dnr <- dnr_covary %>%
+  mutate_at(vars(Total_Pasture_Hay_Hectares:logit_wetlands), scale) %>% 
+  rename_with(~ paste0("scaled_", .), Total_Pasture_Hay_Hectares:logit_wetlands) 
 
 dnr_covary <- dnr_covary %>% 
   left_join(scaled_dnr)
 glimpse(dnr_covary)
 
+#adding dnr covariates into the data
 hg <- hg %>% 
   left_join(dnr_covary)
+rm(dnr_covary, scaled_dnr)
 
-#connection to glm
+#glm - for clarity and area values
 glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(clarity = case_when(is.infinite(clarity) ~ NA,
                              TRUE ~ clarity)) %>% 
   mutate(scaled_clarity = case_when(!is.na(clarity) ~ scale(clarity),
-                                    TRUE ~ clarity))
+                                    TRUE ~ clarity),
+         log_area = log(area))
 
-glimpse(glm)
+glm %>% 
+  ggplot() +
+  geom_histogram(aes(log_area))
+
+glm %>% 
+  ggplot() +
+  geom_histogram(aes(clarity))
 
 hg <- hg %>% 
   left_join(glm) %>% 
   mutate(across(starts_with("scaled_"), as.vector))
+rm(glm)
 glimpse(hg)
 
-#data for modeling
-hg.model <- hg %>% 
+#data for modeling - select for columns of use 
+hg.model <- hg %>%
   select(WATERWAY,
          TYPE,
          DOW,
@@ -96,27 +124,74 @@ hg.model <- hg %>%
          ANATHG,
          NOFISH,
          LGTHIN,
+         scaled_length,
          HGPPM,
          Total_Wetland_Hectares,
          scaled_Total_Wetland_Hectares,
          Percent_Wetland,
          scaled_Percent_Wetland,
+         logit_wetlands,
+         scaled_logit_wetlands,
          WS_Lake_Ratio,
+         log_WS_Lake_Ratio,
          scaled_WS_Lake_Ratio,
          centroid_lat,
          centroid_lon,
          max_depth,
          area,
+         log_area,
          elevation,
          clarity,
          scaled_clarity)
 ```
 
-#Simple model approach to explore trends
+
+#Exploring Predictors
 ```{r}
-#how many samples have the data we need?
+hg.model %>% 
+  ggplot() +
+  geom_histogram(aes(log(HGPPM)))
+
+hg.model %>% 
+  filter(SPEC == "WAE") %>% 
+  ggplot() +
+  geom_histogram(aes(scaled_length))
+
+hg.model %>% 
+  filter(SPEC == "NOP") %>% 
+  ggplot() +
+  geom_histogram(aes(scaled_length))
+
+hg.model %>% 
+  ggplot() +
+  geom_histogram(aes(LGTHIN))
+
+hg.model %>% 
+  filter(SPEC == "WAE") %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, log(HGPPM))) +
+  geom_smooth(aes(LGTHIN, log(HGPPM)))
+
+hg.model %>% 
+  filter(SPEC == "WAE") %>% 
+  ggplot() +
+  geom_point(aes(scaled_length, log(HGPPM))) +
+  geom_smooth(aes(scaled_length, log(HGPPM)))
+
+hg.model %>% 
+  filter(SPEC == "WAE") %>% 
+  ggplot() +
+  geom_point(aes(logit_wetlands, log(HGPPM))) +
+  geom_smooth(aes(logit_wetlands, log(HGPPM)))
+```
+
+
+#First attempt of modeling
+```{r}
+#ensure data clean for modeling
 hg.model.filtered <- hg.model %>% 
   filter(TYPE == "Lake") %>% 
+  filter(YEARCOLL >1996) %>% 
   filter(!(is.na(DOW) |
              is.na(ANATHG) |
              is.na(YEARCOLL) |
@@ -126,37 +201,76 @@ hg.model.filtered <- hg.model %>%
              is.na(WS_Lake_Ratio) |
              is.na(centroid_lat) |
              is.na(area) |
-             is.na(clarity))) %>% 
-  mutate(year = as.character(YEARCOLL)) %>% 
+             is.na(clarity) |
+             is.na(scaled_length))) %>% 
+  mutate(year = factor(YEARCOLL)) %>% 
   mutate(log.hg = log(HGPPM))
+#summary of the data
 summary(hg.model.filtered)
+rm(hg.model, hg)
 
+###################walleye model#################################
 wae <- hg.model.filtered %>% 
   filter(SPEC == "WAE")
 
-#even simpler 
-fit.1 <- glmer(HGPPM ~ LGTHIN + Percent_Wetland + WS_Lake_Ratio + clarity + (1|year) + (1|DOW),
-              data = wae,
-              family = lognormal())
+#simple linear mixed effects model to test before going Bayesian
+fit.1 <- lmer(log.hg ~ scaled_length + 
+                 logit_wetlands +
+                 log_area +
+                 log_WS_Lake_Ratio + 
+                 clarity + 
+                 (1|year) + 
+                 (1|DOW),
+              data = wae)
 summary(fit.1)
 
 
-#specifying model - starting with only walleye
-fit.1 <- brm(HGPPM ~ LGTHIN + Percent_Wetland + WS_Lake_Ratio + clarity + (1|year) + (1|DOW),
-             data = hg.model.filtered %>% filter(SPEC == "WAE"),
-             family = lognormal(),
+#brms model
+fit.1 <- brm(log.hg ~ scaled_length +
+               logit_wetlands + 
+               log_area + 
+               log_WS_Lake_Ratio +
+               clarity + 
+               (1|year) + 
+               (1|DOW),
+             data = wae,
+             family = gaussian(),
              iter = 10000,
-             warmup = 1000)
+             warmup = 1000,
+            chains = 3)
 
+#basic summary output
 summary(fit.1)
 plot(fit.1)
 plot(conditional_effects(fit.1))
 
+#random effects for year
 fit.1 %>%
   spread_draws(b_Intercept, r_year[year,]) %>% 
   median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
   ggplot(aes(y = as.factor(year), x = condition_mean,  xmin = .lower, xmax = .upper)) +
   geom_pointinterval()
+
+#predictive capacity 
+pp_check(fit.1, ndraws = 100)
+loo1 <- loo(fit.1)
+
+kfold <- kfold(fit.1,
+               group = "DOW")
+
+print(loo1)
+plot(loo1)
+#marginal posterior predictive checks
+yrep <- posterior_predict(fit.1)
+ppc_loo_pit_qq(
+  y = wae$log.hg,
+  yrep = yrep,
+  lw = weights(loo1$psis_object)
+)
+#doesn't fit because the model isn't good enough :(
+###############northern pike model#######################################
+nop <- hg.model.filtered %>% 
+  filter(SPEC == "NOP")
 ```
 
 #Old code
