@@ -145,7 +145,6 @@ hg.model <- hg %>%
          scaled_clarity)
 ```
 
-
 #Exploring Predictors
 ```{r}
 hg.model %>% 
@@ -184,7 +183,6 @@ hg.model %>%
   geom_point(aes(logit_wetlands, log(HGPPM))) +
   geom_smooth(aes(logit_wetlands, log(HGPPM)))
 ```
-
 
 #First attempt of modeling
 ```{r}
