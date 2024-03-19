@@ -8,7 +8,6 @@ editor_options:
 ---
 
 #To do:
--think about how to transform and appropriately scale terms
 
 #Library
 ```{r}
@@ -64,12 +63,12 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
 
 #connection to covariates
 dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
-  mutate(logit_wetlands = logit(Percent_Wetland),
+  mutate(logit_wetlands = car::logit(Percent_Wetland),
          log_WS_Lake_Ratio = log(WS_Lake_Ratio)) 
 
 dnr_covary %>% 
   ggplot() +
-  geom_histogram(aes(scaled_logit_wetlands))
+  geom_histogram(aes(logit_wetlands))
 
 dnr_covary %>% 
   ggplot() +
@@ -92,6 +91,7 @@ rm(dnr_covary, scaled_dnr)
 glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
+  mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
   mutate(clarity = case_when(is.infinite(clarity) ~ NA,
                              TRUE ~ clarity)) %>% 
   mutate(scaled_clarity = case_when(!is.na(clarity) ~ scale(clarity),
@@ -203,7 +203,8 @@ hg.model.filtered <- hg.model %>%
              is.na(area) |
              is.na(clarity) |
              is.na(scaled_length))) %>% 
-  mutate(year = factor(YEARCOLL)) %>% 
+  mutate(year = factor(YEARCOLL),
+         DOW = factor(DOW)) %>% 
   mutate(log.hg = log(HGPPM))
 #summary of the data
 summary(hg.model.filtered)
@@ -214,7 +215,7 @@ wae <- hg.model.filtered %>%
   filter(SPEC == "WAE")
 
 #simple linear mixed effects model to test before going Bayesian
-fit.1 <- lmer(log.hg ~ scaled_length + 
+fit.wae <- lmer(log.hg ~ scaled_length + 
                  logit_wetlands +
                  log_area +
                  log_WS_Lake_Ratio + 
@@ -222,11 +223,11 @@ fit.1 <- lmer(log.hg ~ scaled_length +
                  (1|year) + 
                  (1|DOW),
               data = wae)
-summary(fit.1)
+summary(fit.wae)
 
 
 #brms model
-fit.1 <- brm(log.hg ~ scaled_length +
+fit.wae <- brm(log.hg ~ scaled_length +
                logit_wetlands + 
                log_area + 
                log_WS_Lake_Ratio +
@@ -237,40 +238,413 @@ fit.1 <- brm(log.hg ~ scaled_length +
              family = gaussian(),
              iter = 10000,
              warmup = 1000,
-            chains = 3)
+            chains = 3,
+            cores = 10)
+#save model run/read in saved model run
+saveRDS(fit.wae, "WAE_model.rds")
+fit.wae <- readRDS("WAE_model.rds")
 
 #basic summary output
-summary(fit.1)
-plot(fit.1)
-plot(conditional_effects(fit.1))
+summary(fit.wae)
+plot(fit.wae)
+plot(conditional_effects(fit.wae))
 
 #random effects for year
-fit.1 %>%
+fit.wae %>%
   spread_draws(b_Intercept, r_year[year,]) %>% 
   median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
-  ggplot(aes(y = as.factor(year), x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  ggplot(aes(y = year, x = condition_mean,  xmin = .lower, xmax = .upper)) +
   geom_pointinterval()
 
+fit.wae %>%
+  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  ggplot(aes(y = as.factor(DOW), x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+
+chunks <- fit.wae %>%
+  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  arrange(desc(condition_mean)) %>% 
+  group_by(chunk = ceiling(row_number() / 50))
+
+# Plot each chunk separately
+plots <- list()
+for (i in unique(chunks$chunk)) {
+  plot_data <- chunks %>%
+    filter(chunk == i) %>%
+    ggplot(aes(y = as.factor(DOW), x = condition_mean, xmin = .lower, xmax = .upper)) +
+    geom_pointinterval() +
+    labs(title = paste("Chunk", i))
+  
+  plots[[i]] <- plot_data
+}
+
+# Print each plot
+for (i in seq_along(plots)) {
+  print(plots[[i]])
+}
+
 #predictive capacity 
-pp_check(fit.1, ndraws = 100)
-loo1 <- loo(fit.1)
+pp_check(fit.wae, ndraws = 100)
+loo.wae <- loo(fit.wae, save_psis = T)
 
-kfold <- kfold(fit.1,
-               group = "DOW")
-
-print(loo1)
-plot(loo1)
+print(loo.wae)
+plot(loo.wae)
 #marginal posterior predictive checks
-yrep <- posterior_predict(fit.1)
+yrep <- posterior_predict(fit.wae)
 ppc_loo_pit_qq(
   y = wae$log.hg,
   yrep = yrep,
-  lw = weights(loo1$psis_object)
+  lw = weights(loo.wae$psis_object)
 )
-#doesn't fit because the model isn't good enough :(
+
+#PIT overlay on unif
+ppc_loo_pit_overlay(y = wae$log.hg, yrep = yrep, lw = weights(loo.wae$psis_object))
+
+#50 random predictive poionts
+keep_obs <- sample(1:10605, 50, replace = FALSE)
+ppc_loo_intervals(y = wae$log.hg, 
+                  yrep = yrep, 
+                  psis_object = loo.wae$psis_object, 
+                  subset = keep_obs,
+                  order = "median")
+
+rm(fit.wae, loo.wae, plot_data, plots, i, chunks, yrep, wae, keep_obs)
 ###############northern pike model#######################################
 nop <- hg.model.filtered %>% 
   filter(SPEC == "NOP")
+
+fit.nop <- lmer(log.hg ~ scaled_length + 
+                 logit_wetlands +
+                 log_area +
+                 log_WS_Lake_Ratio + 
+                 clarity + 
+                 (1|year) + 
+                 (1|DOW),
+              data = nop)
+summary(nop)
+
+#brms model for nop
+fit.nop <- brm(log.hg ~ scaled_length +
+               logit_wetlands + 
+               log_area + 
+               log_WS_Lake_Ratio +
+               clarity + 
+               (1|year) + 
+               (1|DOW),
+             data = nop,
+             family = gaussian(),
+             iter = 10000,
+             warmup = 1000,
+            chains = 3,
+            cores = 10)
+saveRDS(fit.nop, "NOP_model.rds")
+
+#basic summary output
+summary(fit.nop)
+plot(fit.nop)
+plot(conditional_effects(fit.nop))
+
+#random effects for year
+fit.nop %>%
+  spread_draws(b_Intercept, r_year[year,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
+  ggplot(aes(y = year, x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+
+fit.nop %>%
+  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  ggplot(aes(y = as.factor(DOW), x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+
+chunks <- fit.nop %>%
+  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  arrange(desc(condition_mean)) %>% 
+  group_by(chunk = ceiling(row_number() / 50))
+
+# Plot each chunk separately
+plots <- list()
+for (i in unique(chunks$chunk)) {
+  plot_data <- chunks %>%
+    filter(chunk == i) %>%
+    ggplot(aes(y = as.factor(DOW), x = condition_mean, xmin = .lower, xmax = .upper)) +
+    geom_pointinterval() +
+    labs(title = paste("Chunk", i))
+  
+  plots[[i]] <- plot_data
+}
+
+# Print each plot
+for (i in seq_along(plots)) {
+  print(plots[[i]])
+}
+
+#predictive capacity 
+pp_check(fit.nop, ndraws = 100)
+loo.nop <- loo(fit.nop, save_psis = T)
+
+print(loo.nop)
+plot(loo.nop)
+#marginal posterior predictive checks
+yrep <- posterior_predict(fit.nop)
+ppc_loo_pit_qq(
+  y = nop$log.hg,
+  yrep = yrep,
+  lw = weights(loo.nop$psis_object)
+)
+#PIT overlay on unif
+ppc_loo_pit_overlay(y = nop$log.hg, yrep = yrep, lw = weights(loo.nop$psis_object))
+
+#50 random predictive poionts
+keep_obs <- sample(1:15054, 50, replace = FALSE)
+ppc_loo_intervals(y = nop$log.hg, 
+                  yrep = yrep, 
+                  psis_object = loo.nop$psis_object, 
+                  subset = keep_obs,
+                  order = "median")
+rm(chunks, fit.nop, loo.nop, nop, plot_data, plots, yrep, i, keep_obs)
+###############Bluegill##############
+blg <- hg.model.filtered %>% 
+  filter(SPEC == "BLG")
+
+#brms model for nop
+fit.blg <- brm(log.hg ~ scaled_length +
+               logit_wetlands + 
+               log_area + 
+               log_WS_Lake_Ratio +
+               clarity + 
+               (1|year) + 
+               (1|DOW),
+             data = blg,
+             family = gaussian(),
+             iter = 10000,
+             warmup = 1000,
+            chains = 3,
+            cores = 10)
+saveRDS(fit.blg, "BLG_model.rds")
+
+#basic summary output
+summary(fit.blg)
+plot(fit.blg)
+plot(conditional_effects(fit.blg))
+
+#random effects for year
+fit.blg %>%
+  spread_draws(b_Intercept, r_year[year,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
+  ggplot(aes(y = year, x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+
+chunks <- fit.blg %>%
+  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  arrange(desc(condition_mean)) %>% 
+  group_by(chunk = ceiling(row_number() / 50))
+
+# Plot each chunk separately
+plots <- list()
+for (i in unique(chunks$chunk)) {
+  plot_data <- chunks %>%
+    filter(chunk == i) %>%
+    ggplot(aes(y = as.factor(DOW), x = condition_mean, xmin = .lower, xmax = .upper)) +
+    geom_pointinterval() +
+    labs(title = paste("Chunk", i))
+  
+  plots[[i]] <- plot_data
+}
+
+# Print each plot
+for (i in seq_along(plots)) {
+  print(plots[[i]])
+}
+
+#predictive capacity 
+pp_check(fit.blg, ndraws = 100)
+loo.blg <- loo(fit.blg, save_psis = T)
+
+print(loo.blg)
+plot(loo.blg)
+#marginal posterior predictive checks
+yrep <- posterior_predict(fit.blg)
+ppc_loo_pit_qq(
+  y = blg$log.hg,
+  yrep = yrep,
+  lw = weights(loo.blg$psis_object)
+)
+#PIT overlay on unif
+ppc_loo_pit_overlay(y = blg$log.hg, yrep = yrep, lw = weights(loo.blg$psis_object))
+
+#50 random predictive poionts
+keep_obs <- sample(1:1660, 50, replace = FALSE)
+ppc_loo_intervals(y = blg$log.hg, 
+                  yrep = yrep, 
+                  psis_object = loo.blg$psis_object, 
+                  subset = keep_obs,
+                  order = "median")
+rm(chunks, fit.blg, loo.blg, blg, plot_data, plots, yrep, i, keep_obs)
+
+################largemouth bass####################################
+lmb <- hg.model.filtered %>% 
+  filter(SPEC == "LMB")
+
+#brms model for nop
+fit.lmb <- brm(log.hg ~ scaled_length +
+               logit_wetlands + 
+               log_area + 
+               log_WS_Lake_Ratio +
+               clarity + 
+               (1|year) + 
+               (1|DOW),
+             data = lmb,
+             family = gaussian(),
+             iter = 10000,
+             warmup = 1000,
+            chains = 3,
+            cores = 10)
+saveRDS(fit.lmb, "LMB_model.rds")
+
+#basic summary output
+summary(fit.lmb)
+plot(fit.lmb)
+plot(conditional_effects(fit.lmb))
+
+#random effects for year
+fit.lmb %>%
+  spread_draws(b_Intercept, r_year[year,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
+  ggplot(aes(y = year, x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+
+chunks <- fit.lmb %>%
+  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  arrange(desc(condition_mean)) %>% 
+  group_by(chunk = ceiling(row_number() / 50))
+
+# Plot each chunk separately
+plots <- list()
+for (i in unique(chunks$chunk)) {
+  plot_data <- chunks %>%
+    filter(chunk == i) %>%
+    ggplot(aes(y = as.factor(DOW), x = condition_mean, xmin = .lower, xmax = .upper)) +
+    geom_pointinterval() +
+    labs(title = paste("Chunk", i))
+  
+  plots[[i]] <- plot_data
+}
+
+# Print each plot
+for (i in seq_along(plots)) {
+  print(plots[[i]])
+}
+
+#predictive capacity 
+pp_check(fit.lmb, ndraws = 100)
+loo.lmb <- loo(fit.lmb, save_psis = T)
+
+print(loo.lmb)
+plot(loo.lmb)
+#marginal posterior predictive checks
+yrep <- posterior_predict(fit.lmb)
+ppc_loo_pit_qq(
+  y = lmb$log.hg,
+  yrep = yrep,
+  lw = weights(loo.lmb$psis_object)
+)
+#PIT overlay on unif
+ppc_loo_pit_overlay(y = lmb$log.hg, yrep = yrep, lw = weights(loo.lmb$psis_object))
+
+#50 random predictive poionts
+keep_obs <- sample(1:1470, 50, replace = FALSE)
+ppc_loo_intervals(y = lmb$log.hg, 
+                  yrep = yrep, 
+                  psis_object = loo.lmb$psis_object, 
+                  subset = keep_obs,
+                  order = "median")
+rm(chunks, fit.lmb, loo.lmb, lmb, plot_data, plots, yrep, i, keep_obs)
+
+####################yellow perch###########################
+yep <- hg.model.filtered %>% 
+  filter(SPEC == "YEP")
+
+#brms model for nop
+fit.yep <- brm(log.hg ~ scaled_length +
+               logit_wetlands + 
+               log_area + 
+               log_WS_Lake_Ratio +
+               clarity + 
+               (1|year) + 
+               (1|DOW),
+             data = yep,
+             family = gaussian(),
+             iter = 10000,
+             warmup = 1000,
+            chains = 3,
+            cores = 10)
+saveRDS(fit.yep, "YEP_model.rds")
+
+#basic summary output
+summary(fit.yep)
+plot(fit.yep)
+plot(conditional_effects(fit.yep))
+
+#random effects for year
+fit.yep %>%
+  spread_draws(b_Intercept, r_year[year,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
+  ggplot(aes(y = year, x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+
+chunks <- fit.yep %>%
+  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  arrange(desc(condition_mean)) %>% 
+  group_by(chunk = ceiling(row_number() / 50))
+
+# Plot each chunk separately
+plots <- list()
+for (i in unique(chunks$chunk)) {
+  plot_data <- chunks %>%
+    filter(chunk == i) %>%
+    ggplot(aes(y = as.factor(DOW), x = condition_mean, xmin = .lower, xmax = .upper)) +
+    geom_pointinterval() +
+    labs(title = paste("Chunk", i))
+  
+  plots[[i]] <- plot_data
+}
+
+# Print each plot
+for (i in seq_along(plots)) {
+  print(plots[[i]])
+}
+
+#predictive capacity 
+pp_check(fit.yep, ndraws = 100)
+loo.yep <- loo(fit.yep, save_psis = T)
+
+print(loo.yep)
+plot(loo.yep)
+#marginal posterior predictive checks
+yrep <- posterior_predict(fit.yep)
+ppc_loo_pit_qq(
+  y = yep$log.hg,
+  yrep = yrep,
+  lw = weights(loo.yep$psis_object)
+)
+#PIT overlay on unif
+ppc_loo_pit_overlay(y = yep$log.hg, yrep = yrep, lw = weights(loo.yep$psis_object))
+
+#50 random predictive poionts
+keep_obs <- sample(1:1389, 50, replace = FALSE)
+ppc_loo_intervals(y = yep$log.hg, 
+                  yrep = yrep, 
+                  psis_object = loo.yep$psis_object, 
+                  subset = keep_obs,
+                  order = "median")
+rm(chunks, fit.yep, loo.yep, yep, plot_data, plots, yrep, i, keep_obs)
 ```
 
 #Old code
