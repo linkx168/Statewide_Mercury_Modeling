@@ -822,3 +822,9 @@ lg_hg %>%
 library(Hmsc)
 ```
 
+#sat clarity values
+```{r}
+clarity <- read_csv("Data/MN_sat_clarity.csv")
+glimpse(clarity)
+```
+

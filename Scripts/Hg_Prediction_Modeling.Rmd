@@ -35,7 +35,8 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
   mutate(DOWID = fixlakeid(DOWID)) %>% 
   filter(DOWID != "16000100") %>% 
-  local_to_nhdhr(from_colname = "DOWID", states = "mn")  %>% 
+  local_to_nhdhr(from_colname = "DOWID", states = "mn") %>% 
+  mutate(nhdhr.id = str_remove(nhdhr.id, "nhdhr_")) %>% 
   select(SAMPLENO,
          WATERWAY,
          TYPE,
@@ -55,8 +56,8 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
          HGCODE,
          HGLAB,
          HGCMMT) %>% 
-  rename(nhdid = nhdhr.id,
-         DOW = DOWID) %>% 
+  rename(DOW = DOWID,
+         nhdid = nhdhr.id) %>% 
   group_by(SPEC) %>% 
   mutate(scaled_length = scale(LGTHIN)) %>% 
   ungroup()
@@ -644,6 +645,91 @@ ppc_loo_intervals(y = yep$log.hg,
                   order = "median")
 rm(chunks, fit.yep, loo.yep, yep, plot_data, plots, yrep, i, keep_obs)
 ```
+
+#HMSC
+```{r}
+library(Hmsc)
+
+#filtered data
+hg.model.filtered <- hg.model %>% 
+  filter(TYPE == "Lake") %>% 
+  filter(YEARCOLL >1996) %>% 
+  filter(!(is.na(DOW) |
+             is.na(ANATHG) |
+             is.na(YEARCOLL) |
+             is.na(LGTHIN) |
+             is.na(Total_Wetland_Hectares)|
+             is.na(Percent_Wetland) |
+             is.na(WS_Lake_Ratio) |
+             is.na(centroid_lat) |
+             is.na(area) |
+             is.na(clarity) |
+             is.na(scaled_length))) %>% 
+  mutate(year = factor(YEARCOLL),
+         DOW = factor(DOW)) %>% 
+  mutate(log.hg = log(HGPPM))
+#summary of the data
+summary(hg.model.filtered)
+rm(hg.model, hg)
+
+
+#three species
+three_spec <- hg.model.filtered %>% 
+  filter(SPEC %in% c("WAE", "NOP", "BLC")) %>% 
+  select(DOW,
+         year,
+         SPEC,
+         log.hg,
+         scaled_length,
+         scaled_Percent_Wetland,
+         log_WS_Lake_Ratio,
+         log_area,
+         scaled_clarity) 
+
+test <- three_spec %>% 
+  select(SPEC,
+         log.hg,
+         DOW,
+         year) %>% 
+  pivot_wider(id_cols = c(DOW, year),
+    names_from = SPEC,
+              values_from = log.hg)
+  
+  n = 100
+x1 = rnorm(n)
+x2 = rnorm(n)
+XData = data.frame(x1=x1,x2=x2)
+alpha = c(0,0,0,0,0)
+beta1 = c(1,1,-1,-1,0)
+beta2 = c(1,-1,1,-1,0)
+sigma = c(1,1,1,1,1)
+L = matrix(NA,nrow=n,ncol=5)
+1
+Y = matrix(NA,nrow=n,ncol=5)
+for (j in 1:5){
+L[,j] = alpha[j] + beta1[j]*x1 + beta2[j]*x2
+Y[,j] = L[,j] + rnorm(n, sd = sigma[j])
+}
+
+#trying with brms
+all_species <- hg.model.filtered %>% 
+  filter(SPEC %in% c("NOP", "BLC", "WAE", "BLG", "LMB"))
+
+fit.lmb <- brm(log.hg ~ scaled_length +
+               logit_wetlands + 
+               log_area + 
+               log_WS_Lake_Ratio +
+               clarity + 
+               (1|year) + 
+               (1|DOW/SPEC),
+             data = all_species,
+             family = gaussian(),
+             iter = 10000,
+             warmup = 1000,
+            chains = 3,
+            cores = 10)
+```
+
 
 #Old code
 ```{r}
