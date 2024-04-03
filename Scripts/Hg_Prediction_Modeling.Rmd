@@ -8,6 +8,7 @@ editor_options:
 ---
 
 #To do:
+-get predictions at the lake-year level and see if nop/wae are correlated 
 
 #Library
 ```{r}
@@ -183,6 +184,46 @@ hg.model %>%
   ggplot() +
   geom_point(aes(logit_wetlands, log(HGPPM))) +
   geom_smooth(aes(logit_wetlands, log(HGPPM)))
+
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  ggplot() +
+  geom_histogram(aes(Percent_Wetland))
+
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  ggplot() +
+  geom_histogram(aes(scaled_Percent_Wetland))
+
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  ggplot() +
+  geom_histogram(aes(logit_wetlands))
+
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  ggplot() +
+  geom_histogram(aes(WS_Lake_Ratio))
+
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>%
+  filter(log_WS_Lake_Ratio < 10) %>% 
+  ggplot() +
+  geom_histogram(aes(WS_Lake_Ratio))
+
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  summarise(large.ratio = sum(WS_Lake_Ratio >= 250, na.rm = T),
+            other.ratios = sum(WS_Lake_Ratio < 250, na.rm = T))
+#16 lakes that seem much too big (over 1500)
+#82 over 250
+
+#which lakes would be filtered out?
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  filter(WS_Lake_Ratio >= 250) %>% 
+  distinct(WATERWAY, DOW) %>% 
+  print( n= nrow(.))
 ```
 
 #First attempt of modeling
@@ -202,16 +243,17 @@ hg.model.filtered <- hg.model %>%
              is.na(area) |
              is.na(clarity) |
              is.na(scaled_length))) %>% 
-  mutate(year = factor(YEARCOLL),
-         DOW = factor(DOW)) %>% 
+  mutate(year = as.character(YEARCOLL),
+         DOW = as.character(DOW)) %>% 
   mutate(log.hg = log(HGPPM))
 #summary of the data
 summary(hg.model.filtered)
+glimpse(hg.model.filtered)
 rm(hg.model, hg)
 
 ###################walleye model#################################
 wae <- hg.model.filtered %>% 
-  filter(SPEC == "WAE")
+  filter(SPEC == "WAE") 
 
 #simple linear mixed effects model to test before going Bayesian
 fit.wae <- lmer(log.hg ~ scaled_length + 
@@ -227,7 +269,7 @@ summary(fit.wae)
 
 #brms model
 fit.wae <- brm(log.hg ~ scaled_length +
-               logit_wetlands + 
+               scaled_Percent_Wetland + 
                log_area + 
                log_WS_Lake_Ratio +
                clarity + 
@@ -250,20 +292,21 @@ plot(conditional_effects(fit.wae))
 
 #random effects for year
 fit.wae %>%
-  spread_draws(b_Intercept, r_year[year,]) %>% 
-  median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
+  spread_draws(r_year[year,]) %>% 
+  median_qi(condition_mean = r_year, .width = c(.95, .66)) %>%
   ggplot(aes(y = year, x = condition_mean,  xmin = .lower, xmax = .upper)) +
   geom_pointinterval()
 
 fit.wae %>%
-  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
-  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  spread_draws(r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = r_DOW, .width = c(.95, .66)) %>%
   ggplot(aes(y = as.factor(DOW), x = condition_mean,  xmin = .lower, xmax = .upper)) +
   geom_pointinterval()
 
+
 chunks <- fit.wae %>%
-  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
-  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  spread_draws(r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = r_DOW, .width = c(.95, .66)) %>%
   arrange(desc(condition_mean)) %>% 
   group_by(chunk = ceiling(row_number() / 50))
 
@@ -285,13 +328,60 @@ for (i in seq_along(plots)) {
 }
 
 #predictive capacity 
+yrep <- posterior_predict(fit.wae)
+
 pp_check(fit.wae, ndraws = 100)
+ppc_stat_2d(wae$log.hg, yrep = yrep, stat = c("mean", "sd"))
+median <- ppc_stat_data(wae$log.hg, yrep = yrep, group = wae$DOW, stat = "median")
+error <- ppc_stat_data(wae$log.hg, yrep = yrep, group = wae$DOW, stat = "sd")
+#we have a way of getting data from posterior distributions - now just need a better way to display it
+##find a way to subtract each yrep value from y to get a difference between them?
+
+levels_per_page <- 20
+
+# Determine the total number of pages
+total_pages <- ceiling(nlevels(grouped$data$group) / levels_per_page)
+
+# Create a list to store the ggplot objects for each page
+plot_list <- list()
+
+# Loop through each page
+for (i in 1:total_pages) {
+  # Determine the levels for this page
+  start_level <- (i - 1) * levels_per_page + 1
+  end_level <- min(i * levels_per_page, nlevels(grouped$data$group))
+  levels_this_page <- levels(grouped$data$group)[start_level:end_level]
+  
+  # Filter data for this page
+  filtered_data <- subset(grouped$data, group %in% levels_this_page)
+  
+  # Create ggplot for this page
+  plot <- ggplot(filtered_data, aes(x = value)) +
+    # Add your layers, aesthetics, and geoms here
+    grouped$layers[[1]] + grouped$layers[[2]] + grouped$layers[[3]] +
+    # Facet by group
+    facet_wrap(~ group, scales = "free_y") +
+    # Add any additional settings as needed
+    grouped$theme
+  
+  # Store the plot in the list
+  plot_list[[i]] <- plot
+}
+
+# Print or display the plots (e.g., save to a PDF)
+pdf("multiple_pages_plot.pdf")
+for (i in 1:total_pages) {
+  print(plot_list[[i]])
+}
+dev.off()
+
+#leave one out cross validation
 loo.wae <- loo(fit.wae, save_psis = T)
 
 print(loo.wae)
 plot(loo.wae)
 #marginal posterior predictive checks
-yrep <- posterior_predict(fit.wae)
+
 ppc_loo_pit_qq(
   y = wae$log.hg,
   yrep = yrep,
@@ -326,7 +416,7 @@ summary(nop)
 
 #brms model for nop
 fit.nop <- brm(log.hg ~ scaled_length +
-               logit_wetlands + 
+               scaled_Percent_Wetland + 
                log_area + 
                log_WS_Lake_Ratio +
                clarity + 
@@ -339,28 +429,30 @@ fit.nop <- brm(log.hg ~ scaled_length +
             chains = 3,
             cores = 10)
 saveRDS(fit.nop, "NOP_model.rds")
+fit.nop <- readRDS("NOP_model.rds")
 
 #basic summary output
 summary(fit.nop)
 plot(fit.nop)
 plot(conditional_effects(fit.nop))
 
+
 #random effects for year
 fit.nop %>%
-  spread_draws(b_Intercept, r_year[year,]) %>% 
-  median_qi(condition_mean = b_Intercept + r_year, .width = c(.95, .66)) %>%
+  spread_draws(r_year[year,]) %>% 
+  median_qi(condition_mean = r_year, .width = c(.95, .66)) %>%
   ggplot(aes(y = year, x = condition_mean,  xmin = .lower, xmax = .upper)) +
   geom_pointinterval()
 
 fit.nop %>%
-  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
-  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  spread_draws(r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = r_DOW, .width = c(.95, .66)) %>%
   ggplot(aes(y = as.factor(DOW), x = condition_mean,  xmin = .lower, xmax = .upper)) +
   geom_pointinterval()
 
 chunks <- fit.nop %>%
-  spread_draws(b_Intercept, r_DOW[DOW,]) %>% 
-  median_qi(condition_mean = b_Intercept + r_DOW, .width = c(.95, .66)) %>%
+  spread_draws(r_DOW[DOW,]) %>% 
+  median_qi(condition_mean = r_DOW, .width = c(.95, .66)) %>%
   arrange(desc(condition_mean)) %>% 
   group_by(chunk = ceiling(row_number() / 50))
 
@@ -397,7 +489,66 @@ ppc_loo_pit_qq(
 #PIT overlay on unif
 ppc_loo_pit_overlay(y = nop$log.hg, yrep = yrep, lw = weights(loo.nop$psis_object))
 
-#50 random predictive poionts
+ppc_data <- ppc_stat_data(nop$log.hg, yrep = yrep, group = nop$DOW, stat = "median")
+#actual data within the bounds of the range of the model for how many lakes?
+min_max <- ppc_data %>% 
+  filter(variable != "y") %>% 
+  group_by(group) %>% 
+  summarise(min.median = min(exp(value)),
+            max.median = max(exp(value)))
+
+min_max <- ppc_data %>% 
+  filter(variable == "y") %>% 
+  select(group, value) %>% 
+  mutate(value = exp(value)) %>% 
+  right_join(min_max)
+min_max %>% 
+  filter(value >= min.median & value <= max.median)
+position <- min_max %>% 
+  mutate(position = (value - min.median) / (max.median - min.median),
+         range = max.median - min.median)
+#the position value is a proportion from 0-1 where 0 means the actual value is closer to the min and 1 closer to the max
+position %>% 
+  ggplot() +
+  geom_histogram(aes(position))
+position %>% 
+  ggplot() +
+  geom_histogram(aes(range)) +
+  geom_vline(xintercept = .20)
+filtered_dows <- position %>% 
+  filter(range > 1) %>% 
+  rename(DOW = group)
+#how do our lakes that have a large range in predicted median Hg stack up to the rest?
+#change the variable in the call below for exploration
+nop %>% 
+  mutate(large.range = case_when(DOW %in% filtered_dows$DOW ~ "Y",
+                                 TRUE ~ "N")) %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  ggplot() +
+  geom_histogram(aes(log_WS_Lake_Ratio, fill = large.range))
+#I didn't find a pattern here, but maybe there are just low sample sizes?
+nop %>% 
+  mutate(large.range = case_when(DOW %in% filtered_dows$DOW ~ "Y",
+                                 TRUE ~ "N")) %>% 
+  group_by(DOW, large.range) %>% 
+  count() %>% 
+  ggplot()+
+  geom_histogram(aes(n, fill = large.range))
+#could it be that there is just large variation in the hg of the lake?
+nop %>% 
+  mutate(large.range = case_when(DOW %in% filtered_dows$DOW ~ "Y",
+                                 TRUE ~ "N")) %>%
+  filter(large.range == "Y") %>% 
+  ggplot() + 
+  geom_point(aes(scaled_length, log.hg, color = DOW)) +
+  geom_smooth(aes(scaled_length, log.hg, color = DOW), se = F, method = "lm") + 
+  geom_smooth(data = nop, aes(scaled_length, log.hg), method = "lm") +
+  theme(legend.position = "none")
+#it appears the large range lakes tend to have large hg per length than the collective of lakes
+
+ppc_stat_2d(nop$log.hg, yrep = yrep, stat = c("mean", "sd"))
+
+#50 random predictive points
 keep_obs <- sample(1:15054, 50, replace = FALSE)
 ppc_loo_intervals(y = nop$log.hg, 
                   yrep = yrep, 
@@ -786,5 +937,73 @@ lg.sum <- lg %>%
 
 #joining to Hg data
 hg.lg <- left_join(hg, lg.sum)
+
+#secchi data
+library(dataRetrieval)
+library(tidyverse)
+
+secchi.names <- c(
+  "Depth, Secchi disk depth",
+  "Depth, Secchi disk depth (choice list)",
+  "Secchi Reading Condition (choice list)",
+  "Water transparency, Secchi disc"
+)
+args <- list(
+  statecode = "MN",
+  characteristicName = secchi.names
+)
+secchi <- readWQPdata(args)
+glimpse(secchi)
+
+secchi.clean <- secchi %>%
+  filter(!(ResultMeasure.MeasureUnitCode %in% c("None", NA))) %>% 
+  mutate(ResultMeasureValue = as.numeric(ResultMeasureValue)) %>% #some strings in the result column
+  filter(!is.na(ResultMeasureValue)) %>% 
+  mutate(ResultMeasureValue_clean = case_when(ResultMeasure.MeasureUnitCode == "cm" ~ ResultMeasureValue*.01,
+                                              ResultMeasure.MeasureUnitCode == "ft" ~ ResultMeasureValue*0.3048,
+                                              ResultMeasure.MeasureUnitCode == "in" ~ ResultMeasureValue*0.0254,
+                                              TRUE ~ ResultMeasureValue),
+         ResultMeasure.MeasureUnitCode_clean = "m") %>% 
+  select(OrganizationIdentifier,
+         ActivityIdentifier,
+         ActivityTypeCode,
+         ActivityMediaName,
+         ActivityMediaSubdivisionName,
+         ActivityStartDate,
+         ProjectIdentifier,
+         MonitoringLocationIdentifier,
+         CharacteristicName,
+         ResultMeasureValue,
+         ResultMeasureValue_clean,
+         ResultMeasure.MeasureUnitCode,
+         ResultMeasure.MeasureUnitCode_clean,
+         ProviderName)
+glimpse(secchi.clean)
+
+secchi.clean %>% 
+  summarise(min.year = min(year(ActivityStartDate)),
+            max.year = max(year(ActivityStartDate)))
+
+secchi.clean %>% 
+  group_by(ResultMeasure.MeasureUnitCode, ResultDepthHeightMeasure.MeasureUnitCode_clean) %>% 
+  count()
+
+secchi.clean %>% 
+  filter(ResultMeasure.MeasureUnitCode != "m") %>% 
+  group_by(ResultMeasureValue, ResultMeasureValue_clean) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+secchi.clean %>% 
+  group_by(OrganizationIdentifier) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+secchi.clean %>% 
+  group_by(MonitoringLocationIdentifier) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+#need a crosswalk to get to get lake info connected to the site id
 ```
 
