@@ -39,7 +39,8 @@ library(performance)
 # Data
 ```{r}
 #contaminate data
-hg <- read_csv("Data/allfish_data_20231102_IT.csv") %>% 
+hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv"))  %>% 
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
   mutate(DOWID = fixlakeid(DOWID)) %>% 
   filter(DOWID != "16000100") #remove lake superior 
@@ -79,9 +80,11 @@ hg %>%
 
 #exploartion within hg data 
 ```{r}
-hg_explore <- read_csv("Data/allfish_data_20231102_IT.csv") %>% 
+hg_explore <- read_csv("Data/allfish_data_04042024_JLO.csv") %>% 
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
   mutate(DOWID = fixlakeid(DOWID)) 
+
 
 #generally how many samples per lake?
 hg_explore %>% 
@@ -153,7 +156,7 @@ hg %>%
   group_by(WATERWAY) %>% 
   count() %>% 
   print(n = nrow(.))
-#97 lakes represented
+#102 lakes represented
 
 hg %>% 
   filter(str_detect(HGCODE, "K")) %>% 
@@ -184,13 +187,13 @@ hg %>%
   distinct(WATERWAY, YEARCOLL, SPEC) %>% 
   glimpse()
 
-#what is the limit dected?
+#what is the limit detected?
 hg %>% 
   filter(str_detect(HGCODE, "K")) %>% 
   group_by(HGPPM) %>% 
   count() %>% 
   print(n = nrow(.))
-#looks like it is generally .01-.05 but there might be some erroneous values? .551 certainly is not a limit of detection
+#looks like it is generally .01-.05 
 
 #has this dection limit changed over time?
 hg %>% 
@@ -198,7 +201,7 @@ hg %>%
   group_by(YEARCOLL, HGPPM) %>% 
   count() %>% 
   print(n = nrow(.))
-#it appears most of the erroneus values are from 2022 - sometimes there is variation in the LOD within a year even
+#all samples since 2000 had an lod of 0.01
 
 hg %>% 
   filter(str_detect(HGCODE, "K")) %>% 
@@ -292,11 +295,6 @@ hg_explore %>%
 
 #hg correlation for each species
 ```{r}
-hg_explore <- read_csv("Data/allfish_data_20231102_IT.csv") %>% 
-  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
-  mutate(DOWID = fixlakeid(DOWID)) %>% 
-  filter(DOWID != "16000100")
-
 length.correction <- hg_explore %>% 
   group_by(SPEC) %>% 
   mutate(mean.length = mean(LGTHIN)) %>% 
@@ -726,8 +724,19 @@ hg_zm %>%
   distinct(DOWID, .keep_all = T) %>% 
   group_by(zm_lake) %>% 
   count()
-#213 zm lakes in the hg data 
-# 1247 uninvaded lakes
+#212 zm lakes in the hg data 
+# 1335 uninvaded lakes
+
+hg_zm %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  ggplot() +
+  geom_histogram(aes(Year_Infested))
+
+hg_zm %>% 
+  filter(YEARCOLL== "2023") %>% 
+  distinct(DOWID, .keep_all = T) %>% 
+  group_by(zm_lake) %>% 
+  count()
 
 #how many lakes have pre and post?
 hg_zm %>% 
@@ -737,7 +746,7 @@ hg_zm %>%
   summarise(both_pre_post = n_distinct(pre_post)) %>% 
   filter(both_pre_post >1) %>% 
   count()
-#125 of the 214 zm lakes have pre and post data
+#132 of the 213 zm lakes have pre and post data
 #pretty nifty buttt how many years of pre/post data?
 
 years_pre_post <- hg_zm %>% 
@@ -752,8 +761,9 @@ hg_zm %>%
   pivot_wider(id_cols = DOWID,
               names_from = pre_post,
               values_from = years) %>% 
-  filter(post >= 2 & pre >= 1) %>% 
-  select(pre, post)
+  filter(post >= 1 & pre >= 1) %>% 
+  select(pre, post) %>% 
+  print(n = nrow(.))
 
 hg_zm %>% 
   filter(zm_lake == "y") %>%
@@ -762,7 +772,7 @@ hg_zm %>%
   pivot_wider(id_cols = DOWID,
               names_from = pre_post,
               values_from = years) %>% 
-  filter(is.na(pre))  %>% 
+  filter(is.na(post))  %>% 
   select(pre, post)
 
 years_pre_post %>% 
@@ -777,12 +787,42 @@ years_pre_post %>%
   geom_histogram(aes(years)) +
   facet_wrap(~pre_post, scales = "free")
 #ouch... most lakes only have one year of post data and this isn't even getting to spec level 
-#35 lakes have at least 2 years of post and 1 year of pre
-#26 lakes have at least 2 years pre and post
-#only 11 lakes have more than 3 years post data and at least 1 pre
+#40 lakes have at least 2 years of post and 1 year of pre
+#31 lakes have at least 2 years pre and post
+#only 13 lakes have more than 3 years post data and at least 1 pre
 
 #86 lakes have pre data but no post
 #2 lakes have post data but no pre
+
+
+
+hg_zm %>% 
+  filter(zm_lake == "y") %>% 
+  mutate(log.hg = log(HGPPM)) %>% 
+  ggplot() +
+  geom_point(aes(x = LGTHIN, y = HGPPM, color = pre_post)) +
+  geom_smooth(aes(x = LGTHIN, y = HGPPM, color = pre_post)) +
+  facet_wrap(~SPEC, scales = "free")
+
+unique_zm_lakes <- hg_zm %>% 
+  filter(zm_lake == "y") %>% 
+  distinct(DOWID, WATERWAY)
+
+for (i in 1:nrow(unique_zm_lakes)) {
+  dowid <- unique_zm_lakes$DOWID[i]
+  
+  zm_hg_lakes <- hg_zm %>% 
+    filter(DOWID == dowid) %>% 
+    mutate(log.hg = log(HGPPM))
+  
+  plot <- ggplot(zm_hg_lakes) +
+    geom_point(aes(x = LGTHIN, y = HGPPM, color = pre_post)) +
+    geom_smooth(aes(x = LGTHIN, y = HGPPM, color = pre_post)) +
+    facet_wrap(~SPEC, scales = "free") +
+    ggtitle(paste("Lake:", zm_hg_lakes$WATERWAY))
+  
+  print(plot)
+}
 
 #okay now we know ZM lake sampled for hg, but how might these samples be biased??
 
@@ -815,6 +855,8 @@ lg_hg %>%
   mutate(log.area = log(lake_area_ha)) %>% 
   ggplot() +
   geom_violin(aes(x = zm_lake, y = log.area))
+
+
 ```
 
 # trying joint species distribution model 
