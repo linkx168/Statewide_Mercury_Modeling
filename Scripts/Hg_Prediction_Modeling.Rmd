@@ -32,8 +32,9 @@ library(loo)
 #Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_20231102_IT.csv")) %>% 
-  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
+hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
   filter(DOWID != "16000100") %>% 
   local_to_nhdhr(from_colname = "DOWID", states = "mn") %>% 
@@ -224,6 +225,8 @@ hg.model %>%
   filter(WS_Lake_Ratio >= 250) %>% 
   distinct(WATERWAY, DOW) %>% 
   print( n= nrow(.))
+
+
 ```
 
 #First attempt of modeling
@@ -797,6 +800,18 @@ ppc_loo_intervals(y = yep$log.hg,
 rm(chunks, fit.yep, loo.yep, yep, plot_data, plots, yrep, i, keep_obs)
 ```
 
+#Multivarite approach 
+```{r}
+wae.nop <- hg.model.filtered %>% 
+  filter(SPEC %in% c("WAE", "NOP"))
+
+formula <- bf(log.hg ~ scaled_length + SPEC + scaled_WS_Lake_Ratio + scaled_Total_Wetland_Hectares + log_area + scaled_clarity + (1|lake) + (1|year))
+
+
+
+```
+
+
 #HMSC
 ```{r}
 library(Hmsc)
@@ -845,22 +860,15 @@ test <- three_spec %>%
   pivot_wider(id_cols = c(DOW, year),
     names_from = SPEC,
               values_from = log.hg)
-  
-  n = 100
-x1 = rnorm(n)
-x2 = rnorm(n)
-XData = data.frame(x1=x1,x2=x2)
-alpha = c(0,0,0,0,0)
-beta1 = c(1,1,-1,-1,0)
-beta2 = c(1,-1,1,-1,0)
-sigma = c(1,1,1,1,1)
-L = matrix(NA,nrow=n,ncol=5)
-1
-Y = matrix(NA,nrow=n,ncol=5)
-for (j in 1:5){
-L[,j] = alpha[j] + beta1[j]*x1 + beta2[j]*x2
-Y[,j] = L[,j] + rnorm(n, sd = sigma[j])
-}
+
+#creating a length based correction for fish at the lake level
+wae <- hg.model.filtered %>% 
+  filter(SPEC == "WAE")
+length.correction <- brm(log.hg ~ scaled_length + (1|DOW),
+                         data = wae,
+                         family = gaussian())
+summary(length.correction)
+conditional_effects(length.correction)
 
 #trying with brms
 all_species <- hg.model.filtered %>% 
@@ -1005,5 +1013,11 @@ secchi.clean %>%
   print(n = nrow(.))
 
 #need a crosswalk to get to get lake info connected to the site id
+
+hg %>% 
+  filter(YEARCOLL == "2023") %>% 
+  group_by(WATERWAY) %>% 
+  count() %>% 
+  print(n = nrow(.))
 ```
 
