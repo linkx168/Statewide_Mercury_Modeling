@@ -66,7 +66,7 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
 #connection to covariates
 dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
-         log_WS_Lake_Ratio = log(WS_Lake_Ratio)) 
+         log_WS_Lake_Ratio = log(WS_Lake_Ratio))
 
 dnr_covary %>% 
   ggplot() +
@@ -77,8 +77,8 @@ dnr_covary %>%
   geom_histogram(aes(log_WS_Lake_Ratio))
 
 scaled_dnr <- dnr_covary %>%
-  mutate_at(vars(Total_Pasture_Hay_Hectares:logit_wetlands), scale) %>% 
-  rename_with(~ paste0("scaled_", .), Total_Pasture_Hay_Hectares:logit_wetlands) 
+  mutate_at(vars(Total_Pasture_Hay_Hectares:log_WS_Lake_Ratio), scale) %>% 
+  rename_with(~ paste0("scaled_", .), Total_Pasture_Hay_Hectares:log_WS_Lake_Ratio) 
 
 dnr_covary <- dnr_covary %>% 
   left_join(scaled_dnr)
@@ -98,7 +98,8 @@ glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECT
                              TRUE ~ clarity)) %>% 
   mutate(scaled_clarity = case_when(!is.na(clarity) ~ scale(clarity),
                                     TRUE ~ clarity),
-         log_area = log(area))
+         log_area = log(area),
+         scaled_log_area = c(scale(log_area)))
 
 glm %>% 
   ggplot() +
@@ -136,12 +137,14 @@ hg.model <- hg %>%
          scaled_logit_wetlands,
          WS_Lake_Ratio,
          log_WS_Lake_Ratio,
+         scaled_log_WS_Lake_Ratio,
          scaled_WS_Lake_Ratio,
          centroid_lat,
          centroid_lon,
          max_depth,
          area,
          log_area,
+         scaled_log_area,
          elevation,
          clarity,
          scaled_clarity)
@@ -797,7 +800,7 @@ ppc_loo_intervals(y = yep$log.hg,
 rm(chunks, fit.yep, loo.yep, yep, plot_data, plots, yrep, i, keep_obs)
 ```
 
-#HMSC
+#multivariate 
 ```{r}
 library(Hmsc)
 
@@ -818,7 +821,7 @@ hg.model.filtered <- hg.model %>%
              is.na(scaled_length))) %>% 
   mutate(year = factor(YEARCOLL),
          DOW = factor(DOW)) %>% 
-  mutate(log.hg = log(HGPPM))
+  mutate(log.hg = log(HGPPM)) 
 #summary of the data
 summary(hg.model.filtered)
 rm(hg.model, hg)
@@ -864,13 +867,12 @@ Y[,j] = L[,j] + rnorm(n, sd = sigma[j])
 
 #trying with brms
 all_species <- hg.model.filtered %>% 
-  filter(SPEC %in% c("NOP", "BLC", "WAE", "BLG", "LMB"))
+  filter(SPEC %in% c("NOP", "YEP", "WAE", "BLG", "LMB"))
 
-fit.lmb <- brm(log.hg ~ scaled_length +
-               logit_wetlands + 
-               log_area + 
-               log_WS_Lake_Ratio +
-               clarity + 
+fit.all <- brm(log.hg ~ scaled_length +
+               scaled_Percent_Wetland + 
+               scaled_log_area + 
+               scaled_log_WS_Lake_Ratio +
                (1|year) + 
                (1|DOW/SPEC),
              data = all_species,
@@ -879,6 +881,10 @@ fit.lmb <- brm(log.hg ~ scaled_length +
              warmup = 1000,
             chains = 3,
             cores = 10)
+saveRDS(fit.all, "all_species_model.rds")
+summary(fit.all)
+conditional_effects(fit.all)
+
 ```
 
 
