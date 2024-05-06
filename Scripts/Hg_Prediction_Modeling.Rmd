@@ -934,6 +934,8 @@ metro.analysis %>%
 fit.metro <- brm(log_hg ~ scaled_length + SPEC + (1|DOW) + (1|YEARCOLL),
                  data = metro.analysis,
                  family = gaussian())
+saveRDS(fit.metro, "metro_lake_fit.rds")
+fit.metro <- readRDS("metro_lake_fit.rds")
 
 plot(fit.metro)
 summary(fit.metro)
@@ -965,6 +967,7 @@ dow_effect %>%
   ggplot(aes(y = DOW, x = condition_mean,  xmin = .lower, xmax = .upper)) +
   geom_pointinterval()
 
+
 #map 
 counties <- map_data("county") %>% 
   filter(region == "minnesota") %>% 
@@ -983,12 +986,50 @@ counties <- map_data("county") %>%
 
 median_dow <- dow_effect %>% 
   group_by(DOW, lake_lat_decdeg, lake_lon_decdeg) %>% 
-  summarise(conditional_median = median(r_DOW))
+  summarise(conditional_median = median(r_DOW)) 
 
 ggplot() +
   geom_polygon(data = counties, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
   geom_point(data = median_dow, aes(lake_lon_decdeg, lake_lat_decdeg, color = conditional_median), size = 3) +
-  scale_color_gradient(low = "blue", high = "red")
+  scale_color_gradient(low = "lightgray", high = "black") +
+  theme(panel.background = element_rect(fill = "white"))
+ggsave("metro_dow_random.png", width = 11, height = 7, dpi = 600)
+  
+
+#separate random draws for wae and nop
+get_variables(fit.metro)
+
+spec_dow_effect <- fit.metro %>% 
+  spread_draws(b_Intercept, b_SPECWAE, r_DOW[DOW,])  %>% 
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  mutate(nop.median = b_Intercept + r_DOW,
+         wae.median = b_Intercept + b_SPECWAE + r_DOW,
+         nop.hg = exp(nop.median),
+         wae.hg = exp(wae.median)) %>% 
+  group_by(DOW) %>% 
+  median_qi(nop.hg, wae.hg, .width = c(.9, .66)) %>% 
+  left_join(lake_link) %>% 
+  mutate(state_threshold.nop = case_when(nop.hg >= 0.2 ~ "y", 
+                                         nop.hg < 0.2 ~ "n"),
+         state_threshold.wae = case_when(wae.hg >= 0.2 ~ "y",
+                                         wae.hg < 0.2 ~ "n"))
+
+nop.lake.effect <- ggplot() +
+  geom_polygon(data = counties, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = spec_dow_effect, aes(lake_lon_decdeg, lake_lat_decdeg, color = nop.hg, shape = state_threshold.nop), size = 3) +
+  scale_color_gradient(low = "lightgray", high = "black") +
+  theme(panel.background = element_rect(fill = "white"))
+nop.lake.effect
+ggsave("metro_nop_dow_effect.png", height = 11, width = 7, dpi = 600)
+
+wae.lake.effect <- ggplot() +
+  geom_polygon(data = counties, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = spec_dow_effect, aes(lake_lon_decdeg, lake_lat_decdeg, color = wae.hg, shape = state_threshold.wae), size = 3) +
+  scale_color_gradient(low = "lightgray", high = "black") +
+  theme(panel.background = element_rect(fill = "white"))
+wae.lake.effect
+ggsave("metro_wae_dow_effect.png", height = 11, width = 7, dpi = 600)
 ```
 
 
