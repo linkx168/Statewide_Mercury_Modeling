@@ -32,7 +32,7 @@ library(loo)
 #Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -65,7 +65,7 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          log_WS_Lake_Ratio = log(WS_Lake_Ratio))
 
@@ -91,7 +91,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -803,23 +803,34 @@ ppc_loo_intervals(y = yep$log.hg,
 rm(chunks, fit.yep, loo.yep, yep, plot_data, plots, yrep, i, keep_obs)
 ```
 
-<<<<<<< HEAD
-#multivariate 
-=======
 #Multivarite approach 
 ```{r}
 wae.nop <- hg.model.filtered %>% 
-  filter(SPEC %in% c("WAE", "NOP"))
+  filter(SPEC %in% c("WAE", "NOP")) %>% 
+  filter(WS_Lake_Ratio < 250)
 
-formula <- bf(log.hg ~ scaled_length + SPEC + scaled_WS_Lake_Ratio + scaled_Total_Wetland_Hectares + log_area + scaled_clarity + (1|lake) + (1|year))
+formula <- bf(log.hg ~ scaled_length + SPEC + scaled_log_WS_Lake_Ratio + scaled_logit_wetlands + scaled_log_area + scaled_clarity + (1|DOW:SPEC) + (1|DOW) + (1|year),
+              sigma ~ SPEC)
 
+fit.wae.nop <- brm(formula,
+             data = wae.nop,
+             family = gaussian(),
+             iter = 10000,
+             warmup = 1000,
+            chains = 3,
+            cores = 10)
+saveRDS(fit.wae.nop, "wae_nop_fit.rds")
 
+summary(fit.wae.nop)
+plot(conditional_effects(fit.wae.nop))
+round(vcov(fit.wae),5)
 
+random_effects <- ranef(fit.wae)
+dow.spec <- as.data.frame(random_effects$`DOW:SPEC`)
 ```
 
 
 #HMSC
->>>>>>> 6615631bac06e80411efde04472f03c7f0f140f5
 ```{r}
 library(Hmsc)
 
@@ -897,6 +908,87 @@ saveRDS(fit.all, "all_species_model.rds")
 summary(fit.all)
 conditional_effects(fit.all)
 
+```
+
+# Metro basic analysis 
+```{r}
+metro.analysis <- hg.model %>% 
+  #filtering for metro area lakes (15 county metro area)
+  #hennepin, ramsey, washington, dakota, anoka, chisago, isanti, scott, carver, wright, sherburne
+  filter(substr(DOW, 1, 2) %in% c("27", "62", "82", "19", "02", "13", "30", "70", "10", "86", "71")) %>% 
+  #transforming hg 
+  mutate(log_hg = log(HGPPM)) %>% 
+  #scaling length by species 
+  group_by(SPEC) %>% 
+  mutate(scaled_length = scale(LGTHIN)) %>% 
+  ungroup() %>% 
+  #only looking at pike and walleye
+  filter(SPEC %in% c("WAE", "NOP"))
+
+metro.analysis %>% 
+  mutate(county_num = substr(DOW, 1,2)) %>% 
+  group_by(county_num) %>% 
+  summarise(n = n_distinct(DOW))
+#reports the county number for the dow and how many lakes are within each one
+
+fit.metro <- brm(log_hg ~ scaled_length + SPEC + (1|DOW) + (1|YEARCOLL),
+                 data = metro.analysis,
+                 family = gaussian())
+
+plot(fit.metro)
+summary(fit.metro)
+plot(conditional_effects(fit.metro))
+
+#random effects for DOW
+lake_link <- read_csv("Data/lake_link.csv") %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid) %>% 
+  right_join(metro.analysis) %>% 
+  distinct(DOW, 
+           nhdid, 
+           lake_lat_decdeg, 
+           lake_lon_decdeg)
+
+dow_effect <- fit.metro %>% 
+  spread_draws(r_DOW[DOW,])  %>% 
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  left_join(lake_link) 
+
+dow_effect %>% 
+  filter(is.na(lake_lat_decdeg)) %>% 
+  summarise(n = n_distinct(DOW))
+#the 4 lakes without nhdids are very small lakes - can manually add in later
+
+dow_effect %>% 
+  median_qi(condition_mean = r_DOW, .width = c(.95, .66)) %>%
+  ggplot(aes(y = DOW, x = condition_mean,  xmin = .lower, xmax = .upper)) +
+  geom_pointinterval()
+
+#map 
+counties <- map_data("county") %>% 
+  filter(region == "minnesota") %>% 
+  filter(subregion %in% c("anoka", 
+                          "chisago",
+                          "scott",
+                          "wright",
+                          "carver",
+                          "dakota",
+                          "isanti",
+                          "ramsey",
+                          "sherburne",
+                          "washington",
+                          "hennepin"))
+
+
+median_dow <- dow_effect %>% 
+  group_by(DOW, lake_lat_decdeg, lake_lon_decdeg) %>% 
+  summarise(conditional_median = median(r_DOW))
+
+ggplot() +
+  geom_polygon(data = counties, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = median_dow, aes(lake_lon_decdeg, lake_lat_decdeg, color = conditional_median), size = 3) +
+  scale_color_gradient(low = "blue", high = "red")
 ```
 
 
