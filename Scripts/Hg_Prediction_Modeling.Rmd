@@ -32,7 +32,7 @@ library(loo)
 #Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -65,7 +65,7 @@ hg <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          log_WS_Lake_Ratio = log(WS_Lake_Ratio))
 
@@ -91,7 +91,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -802,6 +802,35 @@ ppc_loo_intervals(y = yep$log.hg,
                   order = "median")
 rm(chunks, fit.yep, loo.yep, yep, plot_data, plots, yrep, i, keep_obs)
 ```
+
+#Modeling with Mixed Effects 5/16
+```{r}
+hg.model %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  summarise(lakes.1000 = sum(WS_Lake_Ratio > 1000, na.rm = T),
+            lakes.500 = sum(WS_Lake_Ratio > 500, na.rm =T),
+            lakes.200 = sum(WS_Lake_Ratio > 200, na.rm =T),
+            lakes.100 = sum(WS_Lake_Ratio > 100, na.rm =T))
+
+#filtering for wae/nop in recent years
+hg.data <- hg.model %>% 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "BGL")) %>% 
+  filter(YEARCOLL > 1999) %>% 
+  filter(WS_Lake_Ratio < 100) %>% #loose 132 lakes and 4788 samples
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM))
+rm(hg)
+
+
+fit.statewide <- brm(HGPPM ~ scaled_length + SPEC + scaled_logit_wetlands + scaled_WS_Lake_Ratio + log_area + scaled_clarity + (1|DOW),
+                     data = hg.data,
+                     iter = 50000,
+                     warmup = 10000,
+                     chains = 3)
+```
+
 
 #Multivarite approach 
 ```{r}
