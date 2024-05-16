@@ -814,7 +814,7 @@ hg.model %>%
 
 #filtering for wae/nop in recent years
 hg.data <- hg.model %>% 
-  filter(SPEC %in% c("WAE", "NOP", "BLC", "BGL")) %>% 
+  filter(SPEC %in% c("WAE", "NOP", "BLC")) %>% 
   filter(YEARCOLL > 1999) %>% 
   filter(WS_Lake_Ratio < 100) %>% #loose 132 lakes and 4788 samples
   group_by(SPEC) %>% 
@@ -823,12 +823,79 @@ hg.data <- hg.model %>%
   mutate(log_hg = log(HGPPM))
 rm(hg)
 
-
-fit.statewide <- brm(HGPPM ~ scaled_length + SPEC + scaled_logit_wetlands + scaled_WS_Lake_Ratio + log_area + scaled_clarity + (1|DOW),
+fit.statewide <- brm(log_hg ~ scaled_length + SPEC + scaled_logit_wetlands + scaled_WS_Lake_Ratio + log_area + scaled_clarity + (1|DOW),
                      data = hg.data,
                      iter = 50000,
                      warmup = 10000,
-                     chains = 3)
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 10)
+saveRDS(fit.statewide, "statewide.predict.rds")
+fit.statewide <- readRDS("statewide.predict.rds")
+
+plot(fit.statewide)
+summary(fit.statewide)
+plot(conditional_effects(fit.statewide))
+
+#pulling conditional effects from lakes 
+lake_link <- read_csv("Data/lake_link.csv") %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid) %>% 
+  right_join(hg.data) %>% 
+  distinct(DOW, 
+           nhdid, 
+           lake_lat_decdeg, 
+           lake_lon_decdeg)
+
+dow_effect <- fit.statewide %>% 
+  spread_draws(r_DOW[DOW,])  %>% 
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  left_join(lake_link) 
+
+dow_effect %>% 
+  filter(is.na(lake_lat_decdeg)) %>% 
+  summarise(n = n_distinct(DOW))
+#7 lakes do not have nhdids - oddly all in st. louis county
+
+#map 
+mn <- map_data("state") %>% 
+  filter(region == "minnesota")
+
+median_dow <- dow_effect %>% 
+  group_by(DOW, lake_lat_decdeg, lake_lon_decdeg) %>% 
+  summarise(lake_medians = median(r_DOW)) 
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = median_dow, aes(lake_lon_decdeg, lake_lat_decdeg, color = lake_medians), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = "bottom") +
+  coord_fixed()
+
+#exploring residuals - not running and will have to explore later
+qres <- hg.data %>%
+  add_predicted_draws(fit.statewide) 
+  summarise(
+    quant_residual = mean(.prediction < log_hg)
+  )
+
+ggplot(qres,
+         aes(sample = quant_residual)) +
+  geom_qq(distribution = stats::qunif) +
+  geom_qq_line(distribution = stats::qunif)
+
+#assessing fit
+preds <- hg.data %>%
+  add_predicted_draws(fit.statewide)
+
+ggplot(preds) + 
+  stat_pointinterval(aes(x = .row, y = .prediction)) +
+  geom_point(aes(x = .row, y = admit), color = "red")
+
+#posterior preditive check - might want to do this at various levels (species)?
+pp_check(fit.statewide, nsamples = 500) 
 ```
 
 
