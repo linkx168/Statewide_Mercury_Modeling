@@ -812,24 +812,26 @@ hg.model %>%
             lakes.200 = sum(WS_Lake_Ratio > 200, na.rm =T),
             lakes.100 = sum(WS_Lake_Ratio > 100, na.rm =T))
 
-#filtering for wae/nop in recent years
+#filtering for specs that have over 1000 observations and most recent years
 hg.data <- hg.model %>% 
-  filter(SPEC %in% c("WAE", "NOP", "BLC")) %>% 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
   filter(YEARCOLL > 1999) %>% 
   filter(WS_Lake_Ratio < 100) %>% #loose 132 lakes and 4788 samples
   group_by(SPEC) %>% 
-  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  mutate(scaled_length = c(scale(LGTHIN)),
+         scaled_log_area = c(scale(log_area))) %>% 
   ungroup() %>%
   mutate(log_hg = log(HGPPM))
-rm(hg)
+rm(hg, hg.model)
 
-fit.statewide <- brm(log_hg ~ scaled_length + SPEC + scaled_logit_wetlands + scaled_WS_Lake_Ratio + log_area + scaled_clarity + (1|DOW),
+fit.statewide <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands + scaled_log_WS_Lake_Ratio + scaled_log_area + scaled_clarity + (1|DOW),
                      data = hg.data,
-                     iter = 50000,
-                     warmup = 10000,
+                     iter = 10000,
+                     warmup = 500,
                      chains = 3,
                      family = gaussian(),
                      cores = 10)
+#I originally ran for 50000 iterations, can likely use less
 saveRDS(fit.statewide, "statewide.predict.rds")
 fit.statewide <- readRDS("statewide.predict.rds")
 
@@ -864,19 +866,208 @@ mn <- map_data("state") %>%
 
 median_dow <- dow_effect %>% 
   group_by(DOW, lake_lat_decdeg, lake_lon_decdeg) %>% 
-  summarise(lake_medians = median(r_DOW)) 
+  summarise(lake_effects = median(r_DOW)) 
+
+#how do the lake parameters contribute to lake effects?
+random_effect_check <- hg.data %>% 
+  select(DOW,
+         SPEC,
+         scaled_logit_wetlands,
+         scaled_log_WS_Lake_Ratio,
+         scaled_log_area,
+         scaled_clarity) %>% 
+  distinct(DOW, SPEC, .keep_all = T) %>% 
+  right_join(median_dow)
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
-  geom_point(data = median_dow, aes(lake_lon_decdeg, lake_lat_decdeg, color = lake_medians), size = 3) +
+  geom_point(data = median_dow, aes(lake_lon_decdeg, lake_lat_decdeg, color = lake_effects), size = 3) +
   scale_color_gradient(low = "blue", high = "orange") +
   theme(panel.background = element_rect(fill = "white"),
-        legend.position = "bottom") +
+        legend.position = c(.72, .4)) +
+  coord_fixed()
+rm(dow_effect)
+
+#predictions of lake-species hg are made following the parameters listed
+# 1. I pull the lake level parameters for each spec-lake 
+# 2. I create a scaled length variable so that predictions are made for the mean length of each species
+# 3. I add predicted draws from the model that use the lake level values from the lake and mean length of species
+# 4. I filter for the lakes where that species was actually analyzed 
+get_variables(fit.statewide)
+
+predictions <- random_effect_check %>% 
+  mutate(scaled_length = c(0)) %>% 
+  add_predicted_draws(fit.statewide)
+
+glimpse(predictions)
+
+#wae
+wae.lakes <- hg.data %>% 
+  filter(SPEC == "WAE") %>% 
+  distinct(DOW)
+
+dow_effect_wae <- predictions %>% 
+  filter(DOW %in% wae.lakes$DOW) %>% 
+  filter(SPEC == "WAE") %>% 
+  mutate(wae.hg = exp(.prediction)) %>% 
+  group_by(DOW) %>% 
+  median_qi(wae.hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(wae.hg >= 0.2 ~ "y",
+                                wae.hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link)
+glimpse(dow_effect_wae)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = dow_effect_wae, aes(lake_lon_decdeg, lake_lat_decdeg, color = wae.hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.72, .4)) +
   coord_fixed()
 
-#exploring residuals - not running and will have to explore later
+#nop
+nop.lakes <- hg.data %>% 
+  filter(SPEC == "NOP") %>% 
+  distinct(DOW)
+
+dow_effect_nop <- predictions %>% 
+  filter(DOW %in% nop.lakes$DOW) %>% 
+  filter(SPEC == "NOP") %>% 
+  mutate(nop.hg = exp(.prediction)) %>% 
+  group_by(DOW) %>% 
+  median_qi(nop.hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(nop.hg >= 0.2 ~ "y",
+                                nop.hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = dow_effect_nop, aes(lake_lon_decdeg, lake_lat_decdeg, color = nop.hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.72, .4)) +
+  coord_fixed()
+
+#yep
+yep.lakes <- hg.data %>% 
+  filter(SPEC == "YEP") %>% 
+  distinct(DOW)
+
+dow_effect_yep <- predictions %>% 
+  filter(DOW %in% yep.lakes$DOW) %>% 
+  filter(SPEC == "YEP") %>% 
+  mutate(yep.hg = exp(.prediction)) %>% 
+  group_by(DOW) %>% 
+  median_qi(yep.hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(yep.hg >= 0.2 ~ "y",
+                                yep.hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = dow_effect_yep, aes(lake_lon_decdeg, lake_lat_decdeg, color = yep.hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.72, .4)) +
+  coord_fixed()
+
+
+#lmb
+lmb.lakes <- hg.data %>% 
+  filter(SPEC == "LMB") %>% 
+  distinct(DOW)
+
+dow_effect_lmb <- predictions %>% 
+  filter(DOW %in% lmb.lakes$DOW) %>% 
+  filter(SPEC == "LMB") %>% 
+  mutate(lmb.hg = exp(.prediction)) %>% 
+  group_by(DOW) %>% 
+  median_qi(lmb.hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(lmb.hg >= 0.2 ~ "y",
+                                lmb.hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = dow_effect_lmb, aes(lake_lon_decdeg, lake_lat_decdeg, color = lmb.hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.72, .4)) +
+  coord_fixed()
+
+#blc
+blc.lakes <- hg.data %>% 
+  filter(SPEC == "BLC") %>% 
+  distinct(DOW)
+
+dow_effect_blc <- predictions %>% 
+  filter(DOW %in% blc.lakes$DOW) %>% 
+  filter(SPEC == "BLC") %>% 
+  mutate(blc.hg = exp(.prediction)) %>% 
+  group_by(DOW) %>% 
+  median_qi(blc.hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(blc.hg >= 0.2 ~ "y",
+                                blc.hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = dow_effect_blc, aes(lake_lon_decdeg, lake_lat_decdeg, color = blc.hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.72, .4)) +
+  coord_fixed()
+
+#wts
+wts.lakes <- hg.data %>% 
+  filter(SPEC == "WTS") %>% 
+  distinct(DOW)
+
+dow_effect_wts <- predictions %>% 
+  filter(DOW %in% wts.lakes$DOW) %>% 
+  filter(SPEC == "WTS") %>% 
+  mutate(wts.hg = exp(.prediction)) %>% 
+  group_by(DOW) %>% 
+  median_qi(wts.hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(wts.hg >= 0.2 ~ "y",
+                                wts.hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = dow_effect_wts, aes(lake_lon_decdeg, lake_lat_decdeg, color = wts.hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.72, .4)) +
+  coord_fixed()
+
+#blg
+blg.lakes <- hg.data %>% 
+  filter(SPEC == "BLG") %>% 
+  distinct(DOW)
+
+dow_effect_blg <- predictions %>% 
+  filter(DOW %in% blg.lakes$DOW) %>% 
+  filter(SPEC == "BLG") %>% 
+  mutate(blg.hg = exp(.prediction)) %>% 
+  group_by(DOW) %>% 
+  median_qi(blg.hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(blg.hg >= 0.2 ~ "y",
+                                blg.hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = dow_effect_blg, aes(lake_lon_decdeg, lake_lat_decdeg, color = blg.hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.72, .4)) +
+  coord_fixed()
+
+
+#exploring residuals - not running and will have to explore later, seems to be too large but will return to this
 qres <- hg.data %>%
-  add_predicted_draws(fit.statewide) 
+  add_predicted_draws(fit.statewide, allow_new_levels = T) %>% 
   summarise(
     quant_residual = mean(.prediction < log_hg)
   )
@@ -894,8 +1085,38 @@ ggplot(preds) +
   stat_pointinterval(aes(x = .row, y = .prediction)) +
   geom_point(aes(x = .row, y = admit), color = "red")
 
-#posterior preditive check - might want to do this at various levels (species)?
-pp_check(fit.statewide, nsamples = 500) 
+#posterior predictive check - might want to do this at various levels (species)?
+pp_check(fit.statewide, ndraws = 500) 
+
+ppc <- posterior_predict(fit.statewide)
+plot_data <- ppd_data(y = hg.data$log_hg, yrep = ppc, group = hg.data$SPEC)
+
+
+#marginal posterior predictive checks
+loo.yep <- loo(fit.statewide, save_psis = T)
+
+#should move these charts higher but i wanted a basic look at density of the number of fish going into each value by time
+hg.model %>% 
+  mutate(dec = case_when(YEARCOLL >= 1970 & YEARCOLL < 1980 ~ "70s",
+                         YEARCOLL >= 1980 & YEARCOLL < 1990 ~ "80s",
+                         YEARCOLL >= 1990 & YEARCOLL < 2000 ~ "90s",
+                         YEARCOLL >= 2000 & YEARCOLL < 2010 ~ "00s",
+                         YEARCOLL >= 2010 & YEARCOLL < 2020 ~ "10s",
+                         YEARCOLL >= 2020 ~ "20s",
+                         TRUE ~ "old")) %>% 
+  ggplot() +
+  geom_density(aes(NOFISH, fill = dec), alpha = .5)
+
+hg.model %>% 
+  mutate(dec = case_when(YEARCOLL >= 1970 & YEARCOLL < 1980 ~ "70s",
+                         YEARCOLL >= 1980 & YEARCOLL < 1990 ~ "80s",
+                         YEARCOLL >= 1990 & YEARCOLL < 2000 ~ "90s",
+                         YEARCOLL >= 2000 & YEARCOLL < 2010 ~ "00s",
+                         YEARCOLL >= 2010 & YEARCOLL < 2020 ~ "10s",
+                         YEARCOLL >= 2020 ~ "20s",
+                         TRUE ~ "old")) %>% 
+  ggplot() +
+  geom_boxplot(aes(x = dec, y = log(NOFISH)))
 ```
 
 
@@ -1135,5 +1356,69 @@ hg %>%
   group_by(WATERWAY) %>% 
   count() %>% 
   print(n = nrow(.))
+
+#old code for calculating specs specific without predictions
+dow_effect_species <- fit.statewide %>% 
+  spread_draws(b_Intercept, 
+               b_SPECWAE, 
+               b_SPECBLG,
+               b_SPECLMB,
+               b_SPECNOP,
+               b_SPECWTS,
+               b_SPECYEP,
+               b_scaled_length, 
+               `b_scaled_length:SPECWAE`, 
+               `b_scaled_length:SPECNOP`,
+               `b_scaled_length:SPECBLG`,
+               `b_scaled_length:SPECLMB`,
+               `b_scaled_length:SPECWTS`,
+               `b_scaled_length:SPECYEP`,
+               b_scaled_logit_wetlands, 
+               b_scaled_log_WS_Lake_Ratio,
+               b_scaled_log_area, 
+               b_scaled_clarity, 
+               r_DOW[DOW,]) %>% 
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>%
+  #since all variables are scaled, when the are 0 (excluded) they are at their means
+  #thus, length and lake level parameters are excluded from the calculations below
+  mutate(nop.median = b_Intercept + b_SPECNOP + b_SPECNOP +  r_DOW,
+         wae.median = b_Intercept + b_SPECWAE + r_DOW,
+         lmb.median = b_Intercept + b_SPECLMB + r_DOW,
+         blg.median = b_Intercept + b_SPECBLG + r_DOW,
+         wts.median = b_Intercept + b_SPECWTS + r_DOW,
+         yep.median = b_Intercept + b_SPECWAE + r_DOW,
+         blc.median = b_Intercept + r_DOW,
+         nop.hg = exp(nop.median),
+         wae.hg = exp(wae.median),
+         lmb.hg = exp(lmb.median),
+         blg.hg = exp(blg.median),
+         wts.hg = exp(wts.median),
+         yep.hg = exp(yep.median),
+         blc.hg = exp(blc.median)) %>% 
+  group_by(DOW) %>% 
+  median_qi(nop.hg, 
+            wae.hg,
+            lmb.hg,
+            blg.hg,
+            wts.hg,
+            yep.hg,
+            blc.hg,
+            .width = c(.9, .66)) %>% 
+  left_join(lake_link) %>% 
+  mutate(state_threshold.nop = case_when(nop.hg >= 0.2 ~ "y", 
+                                         nop.hg < 0.2 ~ "n"),
+         state_threshold.wae = case_when(wae.hg >= 0.2 ~ "y",
+                                         wae.hg < 0.2 ~ "n"),
+         state_threshold.lmb = case_when(lmb.hg >= 0.2 ~ "y",
+                                         lmb.hg < 0.2 ~ "n"),
+         state_threshold.blg = case_when(blg.hg >= 0.2 ~ "y",
+                                         blg.hg < 0.2 ~ "n"),
+         state_threshold.blc = case_when(blc.hg >= 0.2 ~ "y",
+                                         blc.hg < 0.2 ~ "n"),
+         state_threshold.wts = case_when(wts.hg >= 0.2 ~ "y",
+                                         wts.hg < 0.2 ~ "n"),
+         state_threshold.yep = case_when(yep.hg >= 0.2 ~ "y",
+                                         yep.hg < 0.2 ~ "n"))
 ```
 
