@@ -831,7 +831,7 @@ fit.statewide <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands 
                      chains = 3,
                      family = gaussian(),
                      cores = 10)
-#I originally ran for 50000 iterations, can likely use less
+
 saveRDS(fit.statewide, "statewide.predict.rds")
 fit.statewide <- readRDS("statewide.predict.rds")
 
@@ -909,13 +909,13 @@ wae.lakes <- hg.data %>%
 dow_effect_wae <- predictions %>% 
   filter(DOW %in% wae.lakes$DOW) %>% 
   filter(SPEC == "WAE") %>% 
-  mutate(wae.hg = exp(.prediction)) %>% 
+  mutate(hg = exp(.prediction)) %>% 
   group_by(DOW) %>% 
-  median_qi(wae.hg, .width = c(.66,.95)) %>% 
-  mutate(state_line = case_when(wae.hg >= 0.2 ~ "y",
-                                wae.hg < 0.2 ~ "n")) %>% 
-  left_join(lake_link)
-glimpse(dow_effect_wae)
+  median_qi(hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(hg >= 0.2 ~ "y",
+                                hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link) %>% 
+  mutate(SPEC = "WAE")
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
@@ -933,12 +933,13 @@ nop.lakes <- hg.data %>%
 dow_effect_nop <- predictions %>% 
   filter(DOW %in% nop.lakes$DOW) %>% 
   filter(SPEC == "NOP") %>% 
-  mutate(nop.hg = exp(.prediction)) %>% 
+  mutate(hg = exp(.prediction)) %>% 
   group_by(DOW) %>% 
-  median_qi(nop.hg, .width = c(.66,.95)) %>% 
-  mutate(state_line = case_when(nop.hg >= 0.2 ~ "y",
-                                nop.hg < 0.2 ~ "n")) %>% 
-  left_join(lake_link)
+  median_qi(hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(hg >= 0.2 ~ "y",
+                                hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link) %>% 
+  mutate(SPEC = "NOP")
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
@@ -956,12 +957,13 @@ yep.lakes <- hg.data %>%
 dow_effect_yep <- predictions %>% 
   filter(DOW %in% yep.lakes$DOW) %>% 
   filter(SPEC == "YEP") %>% 
-  mutate(yep.hg = exp(.prediction)) %>% 
+  mutate(hg = exp(.prediction)) %>% 
   group_by(DOW) %>% 
-  median_qi(yep.hg, .width = c(.66,.95)) %>% 
-  mutate(state_line = case_when(yep.hg >= 0.2 ~ "y",
-                                yep.hg < 0.2 ~ "n")) %>% 
-  left_join(lake_link)
+  median_qi(hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(hg >= 0.2 ~ "y",
+                                hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link) %>% 
+  mutate(SPEC = "YEP")
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
@@ -980,12 +982,13 @@ lmb.lakes <- hg.data %>%
 dow_effect_lmb <- predictions %>% 
   filter(DOW %in% lmb.lakes$DOW) %>% 
   filter(SPEC == "LMB") %>% 
-  mutate(lmb.hg = exp(.prediction)) %>% 
+  mutate(hg = exp(.prediction)) %>% 
   group_by(DOW) %>% 
-  median_qi(lmb.hg, .width = c(.66,.95)) %>% 
-  mutate(state_line = case_when(lmb.hg >= 0.2 ~ "y",
-                                lmb.hg < 0.2 ~ "n")) %>% 
-  left_join(lake_link)
+  median_qi(hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(hg >= 0.2 ~ "y",
+                                hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link) %>% 
+  mutate(SPEC = "LMB")
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
@@ -1003,12 +1006,13 @@ blc.lakes <- hg.data %>%
 dow_effect_blc <- predictions %>% 
   filter(DOW %in% blc.lakes$DOW) %>% 
   filter(SPEC == "BLC") %>% 
-  mutate(blc.hg = exp(.prediction)) %>% 
+  mutate(hg = exp(.prediction)) %>% 
   group_by(DOW) %>% 
-  median_qi(blc.hg, .width = c(.66,.95)) %>% 
-  mutate(state_line = case_when(blc.hg >= 0.2 ~ "y",
-                                blc.hg < 0.2 ~ "n")) %>% 
-  left_join(lake_link)
+  median_qi(hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(hg >= 0.2 ~ "y",
+                                hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link) %>% 
+  mutate(SPEC = "BLC")
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
@@ -1026,12 +1030,13 @@ wts.lakes <- hg.data %>%
 dow_effect_wts <- predictions %>% 
   filter(DOW %in% wts.lakes$DOW) %>% 
   filter(SPEC == "WTS") %>% 
-  mutate(wts.hg = exp(.prediction)) %>% 
+  mutate(hg = exp(.prediction)) %>% 
   group_by(DOW) %>% 
-  median_qi(wts.hg, .width = c(.66,.95)) %>% 
-  mutate(state_line = case_when(wts.hg >= 0.2 ~ "y",
-                                wts.hg < 0.2 ~ "n")) %>% 
-  left_join(lake_link)
+  median_qi(hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(hg >= 0.2 ~ "y",
+                                hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link) %>% 
+  mutate(SPEC = "WTS")
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
@@ -1049,12 +1054,13 @@ blg.lakes <- hg.data %>%
 dow_effect_blg <- predictions %>% 
   filter(DOW %in% blg.lakes$DOW) %>% 
   filter(SPEC == "BLG") %>% 
-  mutate(blg.hg = exp(.prediction)) %>% 
+  mutate(hg = exp(.prediction)) %>% 
   group_by(DOW) %>% 
-  median_qi(blg.hg, .width = c(.66,.95)) %>% 
-  mutate(state_line = case_when(blg.hg >= 0.2 ~ "y",
-                                blg.hg < 0.2 ~ "n")) %>% 
-  left_join(lake_link)
+  median_qi(hg, .width = c(.66,.95)) %>% 
+  mutate(state_line = case_when(hg >= 0.2 ~ "y",
+                                hg < 0.2 ~ "n")) %>% 
+  left_join(lake_link) %>% 
+  mutate(SPEC = "BLG")
 
 ggplot() +
   geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
@@ -1063,6 +1069,63 @@ ggplot() +
   theme(panel.background = element_rect(fill = "white"),
         legend.position = c(.72, .4)) +
   coord_fixed()
+
+#all species together
+all_species_preds <- bind_rows(dow_effect_blc, 
+                    dow_effect_blg, 
+                    dow_effect_lmb, 
+                    dow_effect_nop, 
+                    dow_effect_wae,
+                    dow_effect_wts,
+                    dow_effect_yep)
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = all_species_preds, aes(lake_lon_decdeg, lake_lat_decdeg, color = hg, shape = state_line), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = c(.5, .15),
+        legend.box = "horizontal") +
+  facet_wrap(~SPEC) +
+  coord_fixed()
+ggsave("all_spec_map.png", width = 11, height = 7, dpi = 600)
+
+#getting hg correlation from predicted values
+corr <- all_species_preds %>% 
+  filter(.width == "0.95") %>% 
+  select(DOW, hg, nhdid, lake_lat_decdeg, lake_lon_decdeg, SPEC) %>% 
+  pivot_wider(id_cols = c("DOW", "nhdid", "lake_lat_decdeg", "lake_lon_decdeg"),
+              names_from = "SPEC",
+              values_from = "hg")
+corr %>% 
+  ggplot() +
+  geom_point(aes(x = WAE, y = NOP)) +
+  geom_smooth(aes(x = WAE, y = NOP), method = "lm")
+
+species_cols <- corr[, c("BLC", "BLG", "LMB", "NOP", "WAE", "WTS", "YEP")]
+correlation_matrix <- cor(species_cols, use = "pairwise.complete.obs")
+corrplot(correlation_matrix, method = "circle")
+#all correlations are near 1 due to the nature of predicting from the model based on species coefficients 
+
+#here is a better look at the difference in hg values within a lake
+all_species_preds %>% 
+  filter(.width == "0.95") %>% 
+  ggplot() +
+  geom_point(aes(x= SPEC, y = hg, color = DOW)) +
+  geom_violin(aes(x= SPEC, y = hg)) +
+  theme(legend.position = "none")
+
+#filtering for a lake that has all species
+no_nas <- corr %>% 
+  drop_na() 
+all_species_preds %>%
+  filter(DOW %in% no_nas$DOW) %>% 
+  ggplot() +
+  geom_col(aes(x=SPEC, y = hg)) +
+  facet_wrap(~DOW)
+
+
+
 
 
 #exploring residuals - not running and will have to explore later, seems to be too large but will return to this
