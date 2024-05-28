@@ -7,9 +7,6 @@ editor_options:
   chunk_output_type: console
 ---
 
-#To do:
--get predictions at the lake-year level and see if nop/wae are correlated 
-
 #Library
 ```{r}
 library(tidyverse)
@@ -27,6 +24,7 @@ library(tidybayes)
 library(rstanarm)
 library(bayesplot)
 library(loo)
+library(arrow)
 ```
 
 #Data
@@ -1124,62 +1122,88 @@ all_species_preds %>%
   geom_col(aes(x=SPEC, y = hg)) +
   facet_wrap(~DOW)
 
+#manual residuals 
+#looking at log.hg of observed vs log.hg predicted for testing model fit
+res <- hg.data %>% 
+  filter(!(DOW %in% c("16063300", 
+                      "31122500",
+                      "38021100",
+                      "38053200",
+                      "41011000",
+                      "69045900",
+                      "69058900",
+                      "69069000",
+                      "69069300",
+                      "69069400",
+                      "69075500",
+                      "69075700"))) %>% 
+  select(DOW,
+         SPEC,
+         scaled_logit_wetlands,
+         scaled_log_WS_Lake_Ratio,
+         scaled_log_area,
+         scaled_clarity,
+         scaled_length,
+         log_hg) %>% 
+  add_residual_draws(fit.statewide)
+res <- res %>% 
+  ungroup()
+#write_dataset(dataset = res, path = "Output/raw_residuals_arrow")
+res <- open_dataset("Output/raw_residuals_arrow")
 
+res.summary <- res %>%
+  median_qi() 
+write_csv(res.summary, "summary_residuals.csv")
 
+res.summary %>% 
+ggplot(aes(sample = .residual)) +
+  geom_qq() +
+  geom_qq_line() +
+  facet_wrap(~SPEC, scales = "free")
 
-
-#exploring residuals - not running and will have to explore later, seems to be too large but will return to this
-qres <- hg.data %>%
-  add_predicted_draws(fit.statewide, allow_new_levels = T) %>% 
-  summarise(
-    quant_residual = mean(.prediction < log_hg)
-  )
-
-ggplot(qres,
-         aes(sample = quant_residual)) +
-  geom_qq(distribution = stats::qunif) +
-  geom_qq_line(distribution = stats::qunif)
-
-#assessing fit
-preds <- hg.data %>%
-  add_predicted_draws(fit.statewide)
-
-ggplot(preds) + 
-  stat_pointinterval(aes(x = .row, y = .prediction)) +
-  geom_point(aes(x = .row, y = admit), color = "red")
-
-#posterior predictive check - might want to do this at various levels (species)?
-pp_check(fit.statewide, ndraws = 500) 
-
-ppc <- posterior_predict(fit.statewide)
-plot_data <- ppd_data(y = hg.data$log_hg, yrep = ppc, group = hg.data$SPEC)
-
-
-#marginal posterior predictive checks
-loo.yep <- loo(fit.statewide, save_psis = T)
-
-#should move these charts higher but i wanted a basic look at density of the number of fish going into each value by time
-hg.model %>% 
-  mutate(dec = case_when(YEARCOLL >= 1970 & YEARCOLL < 1980 ~ "70s",
-                         YEARCOLL >= 1980 & YEARCOLL < 1990 ~ "80s",
-                         YEARCOLL >= 1990 & YEARCOLL < 2000 ~ "90s",
-                         YEARCOLL >= 2000 & YEARCOLL < 2010 ~ "00s",
-                         YEARCOLL >= 2010 & YEARCOLL < 2020 ~ "10s",
-                         YEARCOLL >= 2020 ~ "20s",
-                         TRUE ~ "old")) %>% 
+res.summary %>% 
   ggplot() +
-  geom_density(aes(NOFISH, fill = dec), alpha = .5)
+  geom_point(aes(scaled_length, .residual)) +
+  geom_smooth(aes(scaled_length, .residual)) +
+  facet_wrap(~SPEC, scales = "free")
 
-hg.model %>% 
-  mutate(dec = case_when(YEARCOLL >= 1970 & YEARCOLL < 1980 ~ "70s",
-                         YEARCOLL >= 1980 & YEARCOLL < 1990 ~ "80s",
-                         YEARCOLL >= 1990 & YEARCOLL < 2000 ~ "90s",
-                         YEARCOLL >= 2000 & YEARCOLL < 2010 ~ "00s",
-                         YEARCOLL >= 2010 & YEARCOLL < 2020 ~ "10s",
-                         YEARCOLL >= 2020 ~ "20s",
-                         TRUE ~ "old")) %>% 
+res.summary %>% 
   ggplot() +
-  geom_boxplot(aes(x = dec, y = log(NOFISH)))
+  geom_histogram(aes(.residual)) +
+  facet_wrap(~SPEC, scales = "free")
+
+#probability residuals and quantile residuals
+#predicted probability of seeing an observation less than or equal to the actual observation 
+res.prob <- hg.data %>% 
+  filter(!(DOW %in% c("16063300", 
+                      "31122500",
+                      "38021100",
+                      "38053200",
+                      "41011000",
+                      "69045900",
+                      "69058900",
+                      "69069000",
+                      "69069300",
+                      "69069400",
+                      "69075500",
+                      "69075700"))) %>% 
+  select(DOW,
+         SPEC,
+         scaled_logit_wetlands,
+         scaled_log_WS_Lake_Ratio,
+         scaled_log_area,
+         scaled_clarity,
+         scaled_length,
+         log_hg) %>% 
+  add_predicted_draws(fit.statewide) %>% 
+  summarise(p_residual = mean(.prediction < log_hg), #posterior predictive p-value
+            z_residual = qnorm(p_residual), #apply inverse cumulative distribution function to get quantile residuals
+            .groups = "drop_last")
+
+res.prob %>% 
+  ggplot(aes(sample = z_residual)) +
+  geom_qq() +
+  geom_abline()
 ```
 
 
