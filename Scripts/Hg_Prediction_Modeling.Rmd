@@ -1153,7 +1153,11 @@ res <- open_dataset("Output/raw_residuals_arrow")
 
 res.summary <- res %>%
   median_qi() 
-write_csv(res.summary, "summary_residuals.csv")
+res.summary <- read_csv("summary_residuals.csv") %>% 
+  mutate(fitted.value = log_hg - .residual) %>% 
+  mutate(trans_observed = exp(log_hg),
+         trans_predicted = exp(fitted.value),
+         squared_errors = (trans_observed - trans_predicted) *2)
 
 res.summary %>% 
 ggplot(aes(sample = .residual)) +
@@ -1172,38 +1176,49 @@ res.summary %>%
   geom_histogram(aes(.residual)) +
   facet_wrap(~SPEC, scales = "free")
 
-#probability residuals and quantile residuals
-#predicted probability of seeing an observation less than or equal to the actual observation 
-res.prob <- hg.data %>% 
-  filter(!(DOW %in% c("16063300", 
-                      "31122500",
-                      "38021100",
-                      "38053200",
-                      "41011000",
-                      "69045900",
-                      "69058900",
-                      "69069000",
-                      "69069300",
-                      "69069400",
-                      "69075500",
-                      "69075700"))) %>% 
-  select(DOW,
-         SPEC,
-         scaled_logit_wetlands,
-         scaled_log_WS_Lake_Ratio,
-         scaled_log_area,
-         scaled_clarity,
-         scaled_length,
-         log_hg) %>% 
-  add_predicted_draws(fit.statewide) %>% 
-  summarise(p_residual = mean(.prediction < log_hg), #posterior predictive p-value
-            z_residual = qnorm(p_residual), #apply inverse cumulative distribution function to get quantile residuals
-            .groups = "drop_last")
+res.summary %>% 
+  ggplot() +
+  geom_density(aes(.residual, fill = SPEC), alpha = .5)
 
-res.prob %>% 
-  ggplot(aes(sample = z_residual)) +
-  geom_qq() +
-  geom_abline()
+res.summary %>% 
+  group_by(SPEC) %>% 
+  summarise(mean = mean(.residual),
+            median = median(.residual),
+            sd = sd(.residual))
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, .residual)) +
+  geom_point(data = res.summary %>% 
+               filter(log_hg < -4.60516), aes(fitted.value, .residual,  color = "red")) +
+  geom_smooth(aes(fitted.value, .residual)) +
+  geom_vline(xintercept = -1.609438, color = "red") +
+  facet_wrap(~SPEC) +
+  theme(legend.position = "none")
+#Most noticeably for BLC and YEP there is a linear trend at low fitted values... can see it from BLG and WTS too
+#I think this is a LOD problem... all fish of varying lengths have the same HG value 
+#i made all of the values 0.01 and below the red color 
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(scaled_length, exp(fitted.value))) +
+  geom_smooth(aes(scaled_length, exp(fitted.value))) +
+  facet_wrap(~SPEC)
+
+#RMSE
+res.summary %>% 
+  summarise(rmse = sqrt(mean(squared_errors)))
+
+#how do the fitted compare to the observed?
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(log_hg, fitted.value)) +
+  geom_smooth(aes(log_hg, fitted.value), method = "lm") +
+  geom_abline(intercept = 0, slope = 1) +
+  facet_wrap(~SPEC, scales = "free")
+
+
+
 ```
 
 
