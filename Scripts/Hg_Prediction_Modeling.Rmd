@@ -1207,17 +1207,25 @@ res.summary %>%
 
 #RMSE
 res.summary %>% 
+  group_by(SPEC) %>% 
   summarise(rmse = sqrt(mean(squared_errors)))
 
 #how do the fitted compare to the observed?
 res.summary %>% 
   ggplot() +
-  geom_point(aes(log_hg, fitted.value)) +
-  geom_smooth(aes(log_hg, fitted.value), method = "lm") +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm")
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm") +
   geom_abline(intercept = 0, slope = 1) +
   facet_wrap(~SPEC, scales = "free")
 
-
+fit.res <- lm(log_hg ~ fitted.value, data = res.summary)
+summary(fit.res)
+plot(fit.res)
 
 ```
 
