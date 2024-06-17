@@ -1223,10 +1223,35 @@ res.summary %>%
   geom_abline(intercept = 0, slope = 1) +
   facet_wrap(~SPEC, scales = "free")
 
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(log_hg, fitted.value)) +
+  geom_smooth(aes(log_hg, fitted.value), method = "lm")
+
 fit.res <- lm(log_hg ~ fitted.value, data = res.summary)
 summary(fit.res)
 plot(fit.res)
 
+fit.res <- lm(fitted.value ~ log_hg, data = res.summary)
+summary(fit.res)
+
+#map of residuals
+mn <- map_data("state") %>% 
+  filter(region == "minnesota")
+
+res.summary.map <- res.summary %>% 
+  group_by(DOW, SPEC) %>% 
+  summarise(mean.res = mean(.residual)) %>% 
+  left_join(lake_link) 
+
+ggplot() +
+  geom_polygon(data = mn, aes(x = long, y = lat, group = group), fill = NA, color = "black") +
+  geom_point(data = res.summary.map, aes(lake_lon_decdeg, lake_lat_decdeg, color = mean.res), size = 3) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position.inside  = c(.72, .4)) +
+  coord_fixed() +
+  facet_wrap(~SPEC)
 ```
 
 
