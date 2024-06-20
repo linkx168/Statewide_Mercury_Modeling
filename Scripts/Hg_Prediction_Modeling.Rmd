@@ -1152,7 +1152,10 @@ res <- res %>%
 res <- open_dataset("Output/raw_residuals_arrow")
 
 res.summary <- res %>%
-  median_qi() 
+  median_qi()
+
+
+
 res.summary <- read_csv("summary_residuals.csv") %>% 
   mutate(fitted.value = log_hg - .residual) %>% 
   mutate(trans_observed = exp(log_hg),
@@ -1252,6 +1255,25 @@ ggplot() +
         legend.position.inside  = c(.72, .4)) +
   coord_fixed() +
   facet_wrap(~SPEC)
+
+#fitted values vs. length.. how are we hoping up?
+res.summary %>% 
+  ggplot() +
+  geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
+
+res.summary %>% 
+  filter(scaled_length >= -2 & scaled_length <= 2) %>% 
+  ggplot() +
+  geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
+
+res.summary %>% 
+  ggplot() +
+  geom_smooth(aes(scaled_length, exp(fitted.value), color = SPEC))
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(scaled_length, fitted.value, color = SPEC)) +
+  geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
 ```
 
 
@@ -1556,4 +1578,6 @@ dow_effect_species <- fit.statewide %>%
          state_threshold.yep = case_when(yep.hg >= 0.2 ~ "y",
                                          yep.hg < 0.2 ~ "n"))
 ```
+
+
 
