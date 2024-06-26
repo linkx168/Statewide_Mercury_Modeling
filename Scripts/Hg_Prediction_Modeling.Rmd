@@ -816,10 +816,10 @@ hg.data <- hg.model %>%
   filter(YEARCOLL > 1999) %>% 
   filter(WS_Lake_Ratio < 100) %>% #loose 132 lakes and 4788 samples
   group_by(SPEC) %>% 
-  mutate(scaled_length = c(scale(LGTHIN)),
-         scaled_log_area = c(scale(log_area))) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
   ungroup() %>%
-  mutate(log_hg = log(HGPPM))
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)))
 rm(hg, hg.model)
 
 fit.statewide <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands + scaled_log_WS_Lake_Ratio + scaled_log_area + scaled_clarity + (1|DOW),
@@ -1157,10 +1157,7 @@ res.summary <- res %>%
 
 
 res.summary <- read_csv("summary_residuals.csv") %>% 
-  mutate(fitted.value = log_hg - .residual) %>% 
-  mutate(trans_observed = exp(log_hg),
-         trans_predicted = exp(fitted.value),
-         squared_errors = (trans_observed - trans_predicted) *2)
+  mutate(fitted.value = log_hg - .residual)
 
 res.summary %>% 
 ggplot(aes(sample = .residual)) +
@@ -1208,10 +1205,17 @@ res.summary %>%
   geom_smooth(aes(scaled_length, exp(fitted.value))) +
   facet_wrap(~SPEC)
 
-#RMSE
+#RMSE and mad
 res.summary %>% 
+  mutate(squared_residuals = .residual^2,
+         fitted_back = exp(fitted.value),
+         obs_back = exp(log_hg),
+         back_residual = obs_back - fitted_back,
+         abs_back_residual = abs(back_residual)) %>% 
   group_by(SPEC) %>% 
-  summarise(rmse = sqrt(mean(squared_errors)))
+  summarise(rmse = sqrt(mean(squared_residuals)),
+            mad = median(abs_back_residual))
+
 
 #how do the fitted compare to the observed?
 res.summary %>% 
@@ -1256,7 +1260,7 @@ ggplot() +
   coord_fixed() +
   facet_wrap(~SPEC)
 
-#fitted values vs. length.. how are we hoping up?
+#fitted values vs. length.. how are we shaping up?
 res.summary %>% 
   ggplot() +
   geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
@@ -1274,6 +1278,138 @@ res.summary %>%
   ggplot() +
   geom_point(aes(scaled_length, fitted.value, color = SPEC)) +
   geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
+```
+
+#Modeling with removed lake effect
+```{r}
+lake_link <- read_csv("Data/lake_link.csv") %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid) 
+
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area))) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  left_join(lake_link) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg))
+rm(hg, hg.model)
+
+#fitting model
+fit.norand <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands*SPEC + scaled_log_WS_Lake_Ratio*SPEC + scaled_log_area*SPEC + scaled_clarity*SPEC,
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 10)
+#saveRDS(fit.norand, "statewide_norandom.rds")
+fit.norand <- readRDS("statewide_norandom.rds")
+
+plot(fit.norand)
+summary(fit.norand)
+plot(conditional_effects(fit.norand))
+
+#residuals
+res <- hg.data %>% 
+  select(SPEC,
+         scaled_logit_wetlands,
+         scaled_log_WS_Lake_Ratio,
+         scaled_log_area,
+         scaled_clarity,
+         scaled_length,
+         log_hg) %>%
+  drop_na() %>% 
+  add_residual_draws(fit.norand)
+
+res.summary <- res %>% 
+  median_qi(.residual) %>% 
+  mutate(fitted.value = log_hg - .residual)
+write_csv(res.summary, "res_summary_norand.csv")
+
+#looking at residuals 
+#how do the fitted compare to the observed?
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm")
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm") +
+  geom_abline(intercept = 0, slope = 1) +
+  facet_wrap(~SPEC, scales = "free")
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(log_hg, fitted.value)) +
+  geom_smooth(aes(log_hg, fitted.value), method = "lm")
+
+#RMSE and mad
+res.summary %>% 
+  mutate(squared_residuals = .residual^2,
+         fitted_back = exp(fitted.value),
+         obs_back = exp(log_hg),
+         back_residual = obs_back - fitted_back,
+         abs_back_residual = abs(back_residual)) %>% 
+  group_by(SPEC) %>% 
+  summarise(rmse = sqrt(mean(squared_residuals)),
+            mad = median(abs_back_residual))
+
+
+#fitted values vs length
+res.summary %>% 
+  ggplot() +
+  geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
+
+res.summary %>% 
+  filter(scaled_length >= -2 & scaled_length <= 2) %>% 
+  ggplot() +
+  geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
+
+res.summary %>% 
+  ggplot() +
+  geom_smooth(aes(scaled_length, exp(fitted.value), color = SPEC))
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(scaled_length, fitted.value, color = SPEC)) +
+  geom_smooth(aes(scaled_length, fitted.value, color = SPEC))
+
+#outliers
+hg.data %>% 
+  filter(SPEC == "WTS" & scaled_length < -4)
+#all fish under 7 inches and appear to be at the LOD
+
+hg.data %>% 
+  filter(HGPPM <= 0.01) %>% 
+  group_by(SPEC) %>% 
+  count()
+
+hg.data %>% 
+  filter(HGPPM <= 0.01) %>% 
+  summarise(n_distinct(DOW))
+
+hg.data %>% 
+  filter(HGPPM <= 0.01) %>% 
+  summarise(n_distinct(YEARCOLL))
+#no heavy patterns in samples at LOD - all SPEC represented - 40 distinct lakes and 13 distinct years
 ```
 
 
