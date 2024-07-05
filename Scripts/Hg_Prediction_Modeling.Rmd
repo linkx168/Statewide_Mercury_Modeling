@@ -1284,7 +1284,7 @@ res.summary %>%
 ```{r}
 lake_link <- read_csv("Data/lake_link.csv") %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
-  rename(nhdid = lake_nhdid) 
+  rename(nhdid = lake_nhdid)
 
 hg.data <- hg.model %>% 
   #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
@@ -1340,7 +1340,8 @@ res <- hg.data %>%
 res.summary <- res %>% 
   median_qi(.residual) %>% 
   mutate(fitted.value = log_hg - .residual)
-write_csv(res.summary, "res_summary_norand.csv")
+#write_csv(res.summary, "res_summary_norand.csv")
+res.summary <- read_csv("res_summary_norand.csv")
 
 #looking at residuals 
 #how do the fitted compare to the observed?
