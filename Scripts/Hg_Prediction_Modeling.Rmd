@@ -25,6 +25,10 @@ library(rstanarm)
 library(bayesplot)
 library(loo)
 library(arrow)
+library(sf)
+library(maps)
+library(viridis)
+library(tigris)
 ```
 
 #Data
@@ -1308,7 +1312,7 @@ hg.data <- hg.model %>%
   left_join(lake_link) %>% 
   #removes lakes where lat/lon was not grabbed - worth checking in later
   filter(!is.na(lake_lat_decdeg))
-rm(hg, hg.model)
+rm(hg, hg.model, lake_link)
 
 #fitting model
 fit.norand <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands*SPEC + scaled_log_WS_Lake_Ratio*SPEC + scaled_log_area*SPEC + scaled_clarity*SPEC,
@@ -1411,6 +1415,499 @@ hg.data %>%
   filter(HGPPM <= 0.01) %>% 
   summarise(n_distinct(YEARCOLL))
 #no heavy patterns in samples at LOD - all SPEC represented - 40 distinct lakes and 13 distinct years
+```
+
+#Modeling with gaussian processes for auto correlation - with only 100 lakes
+```{r}
+lake_link <- read_csv("Data/lake_link.csv") %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
+
+#converting coordiantes to utm
+lake_link_sf <- lake_link %>% 
+  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326) %>% 
+  st_transform(crs = 32615)
+utm_coords <- st_coordinates(lake_link_sf)
+lake_link <- lake_link %>%
+  mutate(easting = utm_coords[, 1]/1000,
+         northing = utm_coords[, 2]/1000)
+#utm values in km instead of m
+rm(lake_link_sf, utm_coords)
+
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area))) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  left_join(lake_link) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg))
+rm(hg, hg.model)
+
+#sample model run
+unique_lakes <- hg.data %>% 
+  select(DOW) %>% 
+  distinct()
+
+set.seed(123)
+sample_lakes <- unique_lakes %>% 
+  sample_n(100)
+
+hg.data.sample <- hg.data %>% 
+  filter(DOW %in% sample_lakes$DOW)
+rm(unique_lakes, sample_lakes)
+
+
+#fitting model
+fit.gp <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands + scaled_log_WS_Lake_Ratio + scaled_log_area + scaled_clarity + gp(easting, northing),
+                     data = hg.data.sample,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 10)
+#saveRDS(fit.gp, "statewide_gp_sample.rds")
+fit.gp <- readRDS("statewide_gp_sample.rds")
+
+#summaries
+plot(fit.gp)
+summary(fit.gp)
+plot(conditional_effects(fit.gp, ndraws = 500))
+
+#residuals
+res <- hg.data.sample %>% 
+  select(SPEC,
+         scaled_logit_wetlands,
+         scaled_log_WS_Lake_Ratio,
+         scaled_log_area,
+         scaled_clarity,
+         scaled_length,
+         log_hg,
+         easting, 
+         northing) %>%
+  drop_na() %>% 
+  add_residual_draws(fit.gp)
+
+res.summary <- res %>% 
+  median_qi(.residual) %>% 
+  mutate(fitted.value = log_hg - .residual)
+#write_csv(res.summary, "res_summary_gp_sample.csv")
+res.summary <- read_csv("res_summary_gp_sample.csv")
+
+#looking at residuals 
+#how do the fitted compare to the observed?
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm")
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm") +
+  geom_abline(intercept = 0, slope = 1) +
+  facet_wrap(~SPEC, scales = "free")
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(log_hg, fitted.value)) +
+  geom_smooth(aes(log_hg, fitted.value), method = "lm")
+
+#RMSE and mad
+res.summary %>% 
+  mutate(squared_residuals = .residual^2,
+         fitted_back = exp(fitted.value),
+         obs_back = exp(log_hg),
+         back_residual = obs_back - fitted_back,
+         abs_back_residual = abs(back_residual)) %>% 
+  group_by(SPEC) %>% 
+  summarise(rmse = sqrt(mean(squared_residuals)),
+            mad = median(abs_back_residual))
+
+#prob of over 0.2 for range of lengths of each species in each lake
+length_ranges <- hg.data.sample %>% 
+  group_by(SPEC) %>% 
+  summarize(min_length = min(scaled_length), max_length = max(scaled_length))
+
+length_seq <- length_ranges %>% 
+  rowwise() %>% 
+  mutate(scaled_length = list(seq(min_length, max_length, length.out = 25))) %>% 
+  unnest(cols = c(scaled_length))
+
+pred_data <- hg.data.sample %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area, 
+         scaled_clarity) %>% 
+  distinct() %>% 
+  inner_join(length_seq, by = "SPEC")
+
+#prob of average size
+pred_data <- hg.data.sample %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area, 
+         scaled_clarity) %>% 
+  distinct() %>% 
+  mutate(scaled_length = 0)
+
+#predictions <- add_predicted_draws(fit.gp, newdata = pred_data)
+#write_csv(predictions, "preds_gp_sample.csv")
+predictions <- read_csv("preds_gp_sample.csv")
+
+threshold <- predictions %>% 
+  mutate(is_above_threshold = .prediction > log(0.2)) %>% 
+  group_by(SPEC, scaled_length, .draw) %>% 
+  summarise(prob = mean(is_above_threshold), .groups = 'drop') %>% 
+  group_by(SPEC, scaled_length) %>% 
+  summarise(probability_above_threshold = mean(prob),
+            lower_ci = quantile(prob, 0.025),
+            upper_ci = quantile(prob, 0.975))
+
+threshold %>% 
+  ggplot(aes(x = scaled_length, y = probability_above_threshold, color = SPEC)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci, group = SPEC, fill = SPEC), alpha = 0.1, color = NA) +
+  labs(x = "Scaled Length", 
+       y = "Probability of Exceeding 0.2 ppm") +
+  theme_minimal()
+```
+
+#GP with all lakes
+```{r}
+lake_link <- read_csv("Data/lake_link.csv") %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
+
+#converting coordiantes to utm
+lake_link_sf <- lake_link %>% 
+  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326) %>% 
+  st_transform(crs = 32615)
+utm_coords <- st_coordinates(lake_link_sf)
+lake_link <- lake_link %>%
+  mutate(easting = utm_coords[, 1]/1000,
+         northing = utm_coords[, 2]/1000)
+#utm values in km instead of m
+rm(lake_link_sf, utm_coords)
+
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  left_join(lake_link) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  filter(!is.na(clarity)) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3))
+rm(hg, hg.model, lake_link)
+
+#fitting model
+fit.gp <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands + scaled_log_WS_Lake_Ratio + scaled_log_area + scaled_clarity + gp(easting, northing),
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+#saveRDS(fit.gp, "statewide_gp.rds")
+fit.gp <- readRDS("statewide_gp_sample.rds")
+
+#summaries
+plot(fit.gp)
+summary(fit.gp)
+plot(conditional_effects(fit.gp, effects = "SPEC", ndraws = 100))
+
+#residuals - I estimate it would take about 2 hours to run all samples for 50 draws
+res.summary <- hg.data %>% 
+  select(SPEC,
+         scaled_logit_wetlands,
+         scaled_log_WS_Lake_Ratio,
+         scaled_log_area,
+         scaled_clarity,
+         scaled_length,
+         log_hg,
+         easting, 
+         northing) %>%
+  drop_na() %>% 
+  add_residual_draws(fit.gp, ndraws = 50) %>% 
+  median_qi() %>% 
+  mutate(fitted.value = log_hg - .residual)
+write_csv(res.summary, "res_summary_gp_sum.csv")
+res.summary <- read_csv("res_summary_gp_sum.csv")
+
+
+#looking at residuals 
+#how do the fitted compare to the observed?
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm")
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm") +
+  geom_abline(intercept = 0, slope = 1) +
+  facet_wrap(~SPEC, scales = "free")
+
+res.summary %>% 
+  ggplot() +
+  geom_point(aes(log_hg, fitted.value)) +
+  geom_smooth(aes(log_hg, fitted.value), method = "lm")
+
+#with jitter - might have to play around with the width and height
+res.summary %>% 
+  ggplot() +
+  geom_jitter(aes(log_hg, fitted.value), width = 0.5, height = 0.5) +
+  geom_smooth(aes(log_hg, fitted.value), method = "lm")
+
+#high and low lengths? - not applicable to the newest model run as I filtered these points out
+res.summary %>% 
+  mutate(long_short_length = case_when(scaled_length > 3 | scaled_length < -3 ~ "Y",
+                                 TRUE ~ "N")) %>% 
+  ggplot() +
+  geom_point(aes(log_hg, fitted.value)) +
+  geom_point(. %>% filter(long_short_length == "Y"), mapping = aes(log_hg, fitted.value), color = "orange") +
+  geom_smooth(aes(log_hg, fitted.value), method = "lm")
+
+res.summary %>% 
+  mutate(long_short_length = case_when(scaled_length > 3 | scaled_length < -3 ~ "Y",
+                                 TRUE ~ "N")) %>% 
+  ggplot() +
+  geom_point(aes(fitted.value, log_hg)) +
+  geom_point(. %>% filter(long_short_length == "Y"), 
+             mapping = aes(log_hg, fitted.value), color = "orange") +
+  geom_smooth(aes(fitted.value, log_hg), method = "lm") +
+  geom_abline(intercept = 0, slope = 1) +
+  facet_wrap(~SPEC, scales = "free")
+
+
+#RMSE and mad
+res.summary %>% 
+  mutate(squared_residuals = .residual^2,
+         fitted_back = exp(fitted.value),
+         obs_back = exp(log_hg),
+         back_residual = obs_back - fitted_back,
+         abs_back_residual = abs(back_residual)) %>% 
+  group_by(SPEC) %>% 
+  summarise(rmse = sqrt(mean(squared_residuals)),
+            mad = median(abs_back_residual))
+
+#just overall
+res.summary %>% 
+  mutate(squared_residuals = .residual^2,
+         fitted_back = exp(fitted.value),
+         obs_back = exp(log_hg),
+         back_residual = obs_back - fitted_back,
+         abs_back_residual = abs(back_residual)) %>% 
+  summarise(rmse = sqrt(mean(squared_residuals)),
+            mad = median(abs_back_residual))
+
+#prob of over 0.2 for range of lengths of each species 
+length_ranges <- hg.data %>% 
+  group_by(SPEC) %>% 
+  summarize(min_length = min(scaled_length), max_length = max(scaled_length))
+
+length_seq <- length_ranges %>% 
+  rowwise() %>% 
+  mutate(scaled_length = list(seq(min_length, max_length, length.out = 100))) %>% 
+  unnest(cols = c(scaled_length))
+
+pred_data <- hg.data %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area, 
+         scaled_clarity) %>% 
+  distinct() %>% 
+  drop_na() %>%
+  inner_join(length_seq, by = "SPEC")
+rm(length_seq, length_ranges)
+#3137 unique lake-spec combos - thus, 156850 prediction points with 50 lengths
+
+#memory intensive step
+predictions <- pred_data %>% 
+  add_predicted_draws(fit.gp, ndraws = 100) 
+  #median_qi()
+#write_csv(predictions, "preds_gp_sum.csv")
+predictions <- read_csv("preds_gp_sum.csv")
+
+#adding back actual lengths
+length_stats <- hg.data %>% 
+  group_by(SPEC) %>% 
+  summarise(mean_length = mean(LGTHIN),
+            sd_length = sd(LGTHIN),
+            min_length = min(LGTHIN),
+            max_length = max(LGTHIN))
+
+threshold <- predictions %>% 
+  mutate(is_above_threshold = .prediction > log(0.2)) %>% 
+  group_by(SPEC, scaled_length, .draw) %>% 
+  summarise(prob = mean(is_above_threshold), .groups = 'drop') %>%   
+  group_by(SPEC, scaled_length) %>% 
+  summarise(probability_above_threshold = mean(prob),
+            lower_ci = quantile(prob, 0.025),
+            upper_ci = quantile(prob, 0.975)) %>% 
+  left_join(length_stats, by = "SPEC") %>% 
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length) 
+  
+#with all draws
+draw_sum <- predictions %>% 
+  mutate(is_above_threshold = .prediction > log(0.2)) %>% 
+  group_by(SPEC, scaled_length, .draw) %>% 
+  summarise(prob = mean(is_above_threshold), .groups = 'drop') %>% 
+  left_join(length_stats, by = "SPEC") %>% 
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
+
+ggplot() +
+  geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC), color = SPEC), alpha = 0.1) +
+  geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold, color = SPEC))
+
+ggplot() +
+  geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC)), alpha = 0.1) +
+  geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold)) +
+  scale_y_continuous(limits = c(0,1)) +
+  facet_wrap(~SPEC, scales = "free_x") +
+  geom_hline(yintercept = .5, color = "red", linetype = "dashed") +
+  labs(x = "Length (Inches)", 
+       y = "Probability of Exceeding 0.2 ppm") +
+  theme_bw()
+
+#standardized length
+threshold %>% 
+  ggplot(aes(x = scaled_length, y = probability_above_threshold, color = SPEC)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci, group = SPEC, fill = SPEC), alpha = 0.1, color = NA) +
+  labs(x = "Scaled Length", 
+       y = "Probability of Exceeding 0.2 ppm") +
+  theme_minimal()
+
+#actual length
+threshold %>% 
+  ggplot(aes(x = LGTHIN, y = probability_above_threshold, color = SPEC)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci, group = SPEC, fill = SPEC), alpha = 0.1, color = NA) +
+  labs(x = "Length (Inches)", 
+       y = "Probability of Exceeding 0.2 ppm") +
+  theme_minimal()
+
+threshold %>% 
+  ggplot(aes(x = LGTHIN, y = probability_above_threshold)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), alpha = 0.1, color = NA) +
+  labs(x = "Length (Inches)", 
+       y = "Probability of Exceeding 0.2 ppm") +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0,1)) +
+  geom_hline(yintercept = .5, linetype = "dashed") +
+  facet_wrap(~SPEC, scales = "free")
+
+#prob of average size
+pred_data_avg <- hg.data %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area, 
+         scaled_clarity) %>% 
+  distinct() %>% 
+  mutate(scaled_length = 0)
+
+#exploring spatial fit
+grid <- hg.data %>% 
+  filter(SPEC == "WAE") %>% 
+  select(easting, 
+         northing, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_clarity) %>% 
+  distinct()
+
+grid_data <- grid %>%
+  mutate(
+    scaled_length = 0,
+    SPEC = factor("WAE"))
+rm(grid)
+
+predictions <- grid_data %>% 
+  add_predicted_draws(fit.gp, ndraws = 50)
+predictions_sum <- predictions %>% 
+  median_qi() %>% 
+  mutate(easting = easting*1000,
+         northing = northing*1000)
+
+
+# Plot the spatial effect
+mn_boundary <- tigris::states(cb = TRUE) %>% 
+  filter(STUSPS == "MN") %>%
+  st_transform(crs = st_crs("+proj=utm +zone=15 +datum=WGS84"))
+predictions_sf <- st_as_sf(predictions_sum, coords = c("easting", "northing"), crs = st_crs(mn_boundary))
+
+ggplot() +
+  geom_sf(data = mn_boundary) +
+  geom_sf(data = predictions_sf, aes(color = exp(.prediction))) +
+  scale_color_viridis_c() +  
+  theme_minimal()
+
+rm(predictions, 
+   predictions_sf, 
+   predictions_sum, 
+   mn_boundary,
+   grid_data)
+
+#how is scaled length working?
+length_stats %>% 
+  mutate(LGTHIN = (0*sd_length) + mean_length)
+
+hg.data %>% 
+  filter(scaled_length >= -0.01 & scaled_length <= 0.01) %>% 
+  group_by(SPEC) %>% 
+  summarise(mean.length = mean(LGTHIN),
+            n = n())
+
 ```
 
 
