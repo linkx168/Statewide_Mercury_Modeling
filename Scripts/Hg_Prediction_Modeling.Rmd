@@ -1649,12 +1649,12 @@ fit.gp <- brm(log_hg ~ scaled_length*SPEC + SPEC + scaled_logit_wetlands + scale
                      family = gaussian(),
                      cores = 12)
 #saveRDS(fit.gp, "statewide_gp.rds")
-fit.gp <- readRDS("statewide_gp_sample.rds")
+fit.gp <- readRDS("statewide_gp.rds")
 
 #summaries
 plot(fit.gp)
 summary(fit.gp)
-plot(conditional_effects(fit.gp, effects = "SPEC", ndraws = 100))
+plot(conditional_effects(fit.gp, ndraws = 100))
 
 #residuals - I estimate it would take about 2 hours to run all samples for 50 draws
 res.summary <- hg.data %>% 
@@ -1766,12 +1766,14 @@ pred_data <- hg.data %>%
 rm(length_seq, length_ranges)
 #3137 unique lake-spec combos - thus, 156850 prediction points with 50 lengths
 
-#memory intensive step
+#memory intensive step - started at 11:15am 7/17
 predictions <- pred_data %>% 
   add_predicted_draws(fit.gp, ndraws = 100) 
   #median_qi()
 #write_csv(predictions, "preds_gp_sum.csv")
-predictions <- read_csv("preds_gp_sum.csv")
+predictions <- read_csv("preds_gp_sum.csv") %>% 
+  mutate(easting.factor = as.factor(easting),
+         northing.factor = as.factor(northing))
 
 #adding back actual lengths
 length_stats <- hg.data %>% 
@@ -1802,17 +1804,96 @@ draw_sum <- predictions %>%
 
 ggplot() +
   geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC), color = SPEC), alpha = 0.1) +
-  geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold, color = SPEC))
+  geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold, color = SPEC)) +
+  labs(x = "Length (Inches)", 
+       y = "Probability of Exceeding 0.2 ppm")
 
 ggplot() +
-  geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC)), alpha = 0.1) +
+  geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC), color = SPEC), alpha = 0.05) +
   geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold)) +
   scale_y_continuous(limits = c(0,1)) +
   facet_wrap(~SPEC, scales = "free_x") +
   geom_hline(yintercept = .5, color = "red", linetype = "dashed") +
   labs(x = "Length (Inches)", 
        y = "Probability of Exceeding 0.2 ppm") +
+  theme_bw() +
+  theme(legend.position = "none")
+ggsave("prob_exceeding.png", width = 5, height = 5)
+
+#lake specific variability 
+check <- hg.data %>% 
+  mutate(easting.factor = as.factor(easting),
+         northing.factor = as.factor(northing),
+         parent_dow = substr(DOW, 1, 6)) %>%
+  #one lake has multi basins and a few connected lakes get the same UTM, fixing that to get correct join
+  mutate(parent_dow = case_when(parent_dow == "110415" ~ "040030",
+                         parent_dow == "860230" ~ "860229",
+                         TRUE ~ parent_dow)) %>% 
+  distinct(easting.factor, northing.factor, parent_dow) %>% 
+  right_join(predictions, by = c("easting.factor",
+                                 "northing.factor"))
+
+#leech lake specific
+leech.data <- hg.data %>% 
+  filter(DOW == "11020300") %>% 
+  select(WATERWAY, DOW, easting, northing) %>% 
+  distinct(WATERWAY, DOW, easting, northing) 
+#leech has data for BLC, NOP, WAE, and YEP
+
+leech <- predictions %>% 
+  filter(easting >= 392.912 & easting <= 392.913) %>% 
+  filter(SPEC == "WAE")
+  left_join(length_stats, by = "SPEC")
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
+glimpse(leech)
+
+leech %>% 
+ggplot() +
+  geom_point(aes(x = LGTHIN, y = exp(.prediction))) +
+  geom_smooth(aes(x = LGTHIN, y = exp(.prediction))) +
+  geom_hline(yintercept = 0.2) +
+  facet_wrap(~SPEC, scales = "free")
+
+threshold.leech <- leech %>% 
+  mutate(is_above_threshold = .prediction > log(0.2)) %>% 
+  group_by(SPEC, scaled_length, .draw) %>% 
+  summarise(prob = mean(is_above_threshold), .groups = 'drop') %>%   
+  group_by(SPEC, scaled_length) %>% 
+  summarise(probability_above_threshold = mean(prob),
+            lower_ci = quantile(prob, 0.025),
+            upper_ci = quantile(prob, 0.975)) %>% 
+  left_join(length_stats, by = "SPEC") %>% 
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length) 
+  
+#with all draws
+draw_sum.leech <- leech %>% 
+  mutate(is_above_threshold = .prediction > log(0.2)) %>% 
+  group_by(SPEC, scaled_length, .draw) %>% 
+  summarise(prob = mean(is_above_threshold), .groups = 'drop') %>% 
+  left_join(length_stats, by = "SPEC") %>% 
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
+
+ggplot() +
+  geom_line(data = draw_sum.leech, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC)), alpha = 0.1) +
+  geom_line(data = threshold.leech, aes(x = LGTHIN, y = probability_above_threshold)) +
+  scale_y_continuous(limits = c(0,1)) +
+  facet_wrap(~SPEC, scales = "free_x") +
+  geom_hline(yintercept = .5, color = "red", linetype = "dashed") +
+  labs(x = "Length (Inches)", 
+       y = "Probability of Exceeding 0.2 ppm") +
   theme_bw()
+
+threshold.leech %>% 
+  ggplot(aes(x = LGTHIN, y = probability_above_threshold)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), alpha = 0.1, color = NA) +
+  labs(x = "Length (Inches)", 
+       y = "Probability of Exceeding 0.2 ppm") +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0,1)) +
+  geom_hline(yintercept = .5, linetype = "dashed") +
+  facet_wrap(~SPEC, scales = "free")
+rm(leech, leech.data, threshold.leech, draw_sum.leech)
 
 #standardized length
 threshold %>% 
@@ -1909,7 +1990,6 @@ hg.data %>%
             n = n())
 
 ```
-
 
 #Multivarite approach 
 ```{r}
@@ -2015,6 +2095,47 @@ saveRDS(fit.all, "all_species_model.rds")
 summary(fit.all)
 conditional_effects(fit.all)
 
+```
+
+#map of all lakes
+```{r}
+zm <- read_csv("Data/ZM_MN_NHD.csv") %>% 
+  rename(DOWID = DOW) %>% 
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  mutate(DOW = DOWID)
+
+hg_zm <- hg.model %>% 
+  left_join(zm) %>% 
+  mutate(zm_lake = case_when(!is.na(Year_Infested) ~ "y",
+                             TRUE ~ "n"),
+         pre_post = case_when(YEARCOLL >= Year_Infested ~ "post",
+                              YEARCOLL < Year_Infested ~ "pre",
+                              TRUE ~ "never"))
+
+map <- hg_zm %>% 
+  left_join(lake_link) %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  filter(!is.na(easting)) %>% 
+  mutate(easting = easting*1000,
+         northing = northing*1000)
+
+mn_boundary <- tigris::states(cb = TRUE) %>% 
+  filter(STUSPS == "MN") %>%
+  st_transform(crs = st_crs("+proj=utm +zone=15 +datum=WGS84"))
+map_sf <- st_as_sf(map, coords = c("easting", "northing"), crs = st_crs(mn_boundary))
+
+
+ggplot() +
+  geom_sf(data = mn_boundary, fill = "white") +
+  geom_sf(data = map_sf, aes(color = zm_lake, shape = zm_lake)) +
+  theme_minimal() +
+  scale_color_manual("Zebra Mussel Lake", values = c("lightblue", "salmon"), labels = c("No", "Yes")) +
+  scale_shape_manual("Zebra Mussel Lake", values = c(16, 17), labels = c("No", "Yes")) +
+  theme(legend.position = c(.8, .32),
+        legend.background = element_rect(fill = "white", color = "black", size = 0.5),
+    legend.box.background = element_rect(color = "black"))
+ggsave("hg_map_all_lakes.png", width = 5, height = 5, bg = "white")
+rm(hg_zm, hg.model, lake_link, map, map_sf, mn_boundary, zm)
 ```
 
 
