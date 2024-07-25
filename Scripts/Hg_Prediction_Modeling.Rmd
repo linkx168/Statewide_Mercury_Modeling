@@ -1821,7 +1821,7 @@ ggplot() +
 ggsave("prob_exceeding.png", width = 5, height = 5)
 
 #lake specific variability 
-check <- hg.data %>% 
+lakes <- hg.data %>% 
   mutate(easting.factor = as.factor(easting),
          northing.factor = as.factor(northing),
          parent_dow = substr(DOW, 1, 6)) %>%
@@ -1832,6 +1832,36 @@ check <- hg.data %>%
   distinct(easting.factor, northing.factor, parent_dow) %>% 
   right_join(predictions, by = c("easting.factor",
                                  "northing.factor"))
+lakes.sum <- lakes %>% 
+  mutate(above_threshold = .prediction > log(.2)) %>% 
+  group_by(parent_dow, SPEC, scaled_length) %>% 
+  summarise(prob = mean(above_threshold), .groups = 'drop') %>% 
+  left_join(length_stats, by = "SPEC") %>% 
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
+
+species.sum <- lakes %>% 
+  mutate(above_threshold = .prediction > log(.2)) %>% 
+  group_by(SPEC, scaled_length) %>% 
+  summarise(prob = mean(above_threshold), .groups = 'drop') %>% 
+  left_join(length_stats, by = "SPEC") %>% 
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
+
+#initial plot, play around with alpha in the future 
+ggplot() +
+  stat_smooth(data = lakes.sum, aes(LGTHIN, prob, group = parent_dow, color = SPEC, alpha = .5), geom = "smooth", se = F) +
+  stat_smooth(data = species.sum, aes(LGTHIN, prob), geom = "smooth", se = F, color = "black") +
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  facet_wrap(~SPEC, scales = "free")
+
+
+#playing around with density
+ggplot() +
+  stat_smooth(data = lakes.sum, aes(LGTHIN, prob, group = parent_dow, color = SPEC), geom = "smooth", se = FALSE) +
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  geom_hex(data = lakes.sum, aes(LGTHIN, prob), bins = 30, alpha = 0.5) +
+  scale_fill_gradient(low = "blue", high = "red") +
+  facet_wrap(~SPEC, scales = "free")
+
 
 #leech lake specific
 leech.data <- hg.data %>% 
