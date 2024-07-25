@@ -85,6 +85,10 @@ hg_explore <- read_csv("Data/allfish_data_04042024_JLO.csv") %>%
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>% #removes samples with no hg, length, or dow data
   mutate(DOWID = fixlakeid(DOWID)) 
 
+hg_explore %>% 
+  summarise(min_year = min(YEARCOLL),
+            max_year = max(YEARCOLL))
+
 
 #generally how many samples per lake?
 hg_explore %>% 
@@ -726,6 +730,9 @@ hg_zm %>%
   count()
 #212 zm lakes in the hg data 
 # 1335 uninvaded lakes
+
+hg_zm %>% 
+  filter(pre_post == "post")
 
 hg_zm %>% 
   distinct(DOWID, .keep_all = T) %>% 
