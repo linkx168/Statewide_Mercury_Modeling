@@ -1,7 +1,11 @@
 
 
 #'  ---
+<<<<<<< HEAD
 #'  title: "Basic DAG Exploration"
+=======
+#'  title: "Distribution_of_Data"
+>>>>>>> 8fa8a4b42eb164ce725327c72c2a440973f1350e
 #'  author: "Mike Verhoeven"
 #'  date: "26Sep2024"
 #'  output: html_document
