@@ -7,6 +7,12 @@ editor_options:
   chunk_output_type: console
 ---
 
+The general structure of this markdown
+1. load in packages from the library
+2. read in mercury data and attach cov data 
+3. prediction model using brms and gussian processes 
+4. old code used to explore data and/or old analysis 
+
 #Library
 ```{r}
 library(tidyverse)
@@ -29,6 +35,7 @@ library(sf)
 library(maps)
 library(viridis)
 library(tigris)
+library(emmeans)
 ```
 
 #Data
@@ -191,7 +198,18 @@ hg.model <- hg %>%
 ```
 
 #GP with all lakes
+The general structure of this chunk
+1. filter MN state hg data relivent to prediction modeling
+  -notes on the filtering are included below
+2. fitting model with brms
+3. some generic model summary and checks
+4. exploring residuals 
+5. creating products based on the model
+   -prob that a fish at a given length is over the threshold 
+   -lenght vs hg plots
+   -map of hg concentrations of an average size fish throughout the state of MN
 ```{r}
+####################filtering hg data for predictive modeling##################
 hg.data <- hg.model %>% 
   #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
   mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
@@ -223,7 +241,7 @@ hg.data <- hg.model %>%
   filter(!(scaled_length > 3 | scaled_length < -3)) 
 rm(hg, hg.model)
 
-#fitting model
+####################fitting model###########################
 fit.gp <- brm(log_hg ~ 
                 scaled_length*SPEC + 
                 SPEC + 
@@ -240,21 +258,35 @@ fit.gp <- brm(log_hg ~
                      chains = 3,
                      family = gaussian(),
                      cores = 12)
-saveRDS(fit.gp, "statewide_gp.rds")
+#saveRDS(fit.gp, "statewide_gp.rds")
 fit.gp <- readRDS("statewide_gp.rds")
 
-#summaries
+##################basic summaries###############################
 plot(fit.gp)
 summary(fit.gp)
 plot(conditional_effects(fit.gp, ndraws = 100))
 
-#residuals - I estimate it would take about 2 hours to run all samples for 50 draws
+summary <- summary(fit.gp)
+fixed <- as.data.frame(summary$fixed) %>% 
+  rownames_to_column()
+gp <- as.data.frame(summary$gp) %>% 
+  rownames_to_column()
+error <- as.data.frame(summary$spec_pars) %>% 
+  rownames_to_column()
+#write_csv(fixed, "fixed_gp.csv")
+rm(fixed, gp, error)
+
+
+
+######################residuals#############################################
 res.summary <- hg.data %>% 
   select(SPEC,
          scaled_logit_wetlands,
          scaled_log_WS_Lake_Ratio,
          scaled_log_area,
-         scaled_clarity,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample,
          scaled_length,
          log_hg,
          easting, 
@@ -263,7 +295,7 @@ res.summary <- hg.data %>%
   add_residual_draws(fit.gp, ndraws = 50) %>% 
   median_qi() %>% 
   mutate(fitted.value = log_hg - .residual)
-write_csv(res.summary, "res_summary_gp_sum.csv")
+#write_csv(res.summary, "res_summary_gp_sum.csv")
 res.summary <- read_csv("res_summary_gp_sum.csv")
 
 
@@ -334,16 +366,18 @@ res.summary %>%
   summarise(rmse = sqrt(mean(squared_residuals)),
             mad = median(abs_back_residual))
 
-#prob of over 0.2 for range of lengths of each species 
+##########################probability of exceedance#####################
+#create length ranges from original data truncated to fit min and max
 length_ranges <- hg.data %>% 
   group_by(SPEC) %>% 
   summarize(min_length = min(scaled_length), max_length = max(scaled_length))
-
 length_seq <- length_ranges %>% 
   rowwise() %>% 
-  mutate(scaled_length = list(seq(min_length, max_length, length.out = 100))) %>% 
+  mutate(scaled_length = list(seq(min_length, max_length, length.out = 200))) %>% 
   unnest(cols = c(scaled_length))
 
+#create data to predict on 
+#this is based on original data where a SPEC-Lake combo was observed at least once
 pred_data <- hg.data %>% 
   select(easting, 
          northing, 
@@ -358,67 +392,114 @@ pred_data <- hg.data %>%
   drop_na() %>%
   inner_join(length_seq, by = "SPEC")
 rm(length_seq, length_ranges)
-#3137 unique lake-spec combos - thus, 156850 prediction points with 50 lengths
-hg.data %>% 
-  group_by(DOW, SPEC) %>% 
-  count()
 
-#memory intensive step
+hg.data %>% 
+  group_by(DOW, SPEC, zm_sample) %>% 
+  count()
+#3344 unique lake-spec-invasion combos
+
+#add predictive draws
 predictions <- pred_data %>% 
   add_predicted_draws(fit.gp, ndraws = 100) 
   #median_qi()
+#the obs in this df = unique lake-spec-invasion combos X lengths X # of predictive draws
+
 #write_csv(predictions, "preds_gp_sum.csv")
+
+#reading in saved predictive draws
 predictions <- read_csv("preds_gp_sum.csv") %>% 
   mutate(easting.factor = as.factor(easting),
-         northing.factor = as.factor(northing))
-
-#adding back actual lengths
+         northing.factor = as.factor(northing)) %>% 
+  mutate(species = case_when(SPEC == "BLC" ~ "Black Crappie",
+                             SPEC == "BLG" ~ "Bluegill",
+                             SPEC == "LMB" ~ "Largemouth Bass",
+                             SPEC == "NOP" ~ "Northern Pike",
+                             SPEC == "WAE" ~ "Walleye",
+                             SPEC == "WTS" ~ "White Sucker",
+                             SPEC == "YEP" ~ "Yellow Perch"))
+ 
+#add in lengths to convert scaled lengths to inches from original data set
 length_stats <- hg.data %>% 
-  group_by(SPEC) %>% 
+  mutate(species = case_when(SPEC == "BLC" ~ "Black Crappie",
+                             SPEC == "BLG" ~ "Bluegill",
+                             SPEC == "LMB" ~ "Largemouth Bass",
+                             SPEC == "NOP" ~ "Northern Pike",
+                             SPEC == "WAE" ~ "Walleye",
+                             SPEC == "WTS" ~ "White Sucker",
+                             SPEC == "YEP" ~ "Yellow Perch")) %>% 
+  group_by(species) %>% 
   summarise(mean_length = mean(LGTHIN),
             sd_length = sd(LGTHIN),
             min_length = min(LGTHIN),
             max_length = max(LGTHIN))
 
+#set us prob of crossing threshold 
 threshold <- predictions %>% 
+  #create column that indicates if the predicted value is over 0.2
   mutate(is_above_threshold = .prediction > log(0.2)) %>% 
-  group_by(SPEC, scaled_length, .draw) %>% 
+  #This step creates a probability across all lakes for each spec-length-draw
+  group_by(species, scaled_length, .draw) %>% 
   summarise(prob = mean(is_above_threshold), .groups = 'drop') %>%   
-  group_by(SPEC, scaled_length) %>% 
+  #this step sums each spec-length across draws so that we get a variablity in the prob like for the state
+  group_by(species, scaled_length) %>% 
   summarise(probability_above_threshold = mean(prob),
             lower_ci = quantile(prob, 0.025),
             upper_ci = quantile(prob, 0.975)) %>% 
-  left_join(length_stats, by = "SPEC") %>% 
+  #get original lengths back
+  left_join(length_stats, by = "species") %>% 
   mutate(LGTHIN = (scaled_length*sd_length) + mean_length) 
+# the number of species and the number of lengths should = the obs of this df
   
-#with all draws
+#this chuck does not condense .draws so that we can plot each draw to viz the variability at each length
 draw_sum <- predictions %>% 
   mutate(is_above_threshold = .prediction > log(0.2)) %>% 
-  group_by(SPEC, scaled_length, .draw) %>% 
+  group_by(species, scaled_length, .draw) %>% 
   summarise(prob = mean(is_above_threshold), .groups = 'drop') %>% 
-  left_join(length_stats, by = "SPEC") %>% 
+  left_join(length_stats, by = "species") %>% 
   mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
+#number of species X the number of lengths X the number of predictive draws makes up this df
 
+#length in inches by prob
 ggplot() +
-  geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC), color = SPEC), alpha = 0.1) +
-  geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold, color = SPEC)) +
+  geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, species), color = species), alpha = 0.1) +
+  geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold, color = species)) +
+  labs(x = "Length (Inches)", 
+       y = "Probability of Exceeding 0.2 ppm")
+
+#length in inches by prob by smoothed
+ggplot() +
+  geom_line(data = draw_sum, 
+            aes(x = LGTHIN, y = prob, group = interaction(.draw, species), color = species), 
+            alpha = 0.1, 
+            stat = "smooth", method = "loess", span = 0.3, se = FALSE) +  # Smoothing individual draws
+  geom_line(data = threshold, 
+            aes(x = LGTHIN, y = probability_above_threshold, color = species), 
+            stat = "smooth", method = "loess", span = 0.3, se = FALSE) +  # Smoothing average line
   labs(x = "Length (Inches)", 
        y = "Probability of Exceeding 0.2 ppm")
 
 ggplot() +
-  geom_line(data = draw_sum, aes(x = LGTHIN, y = prob, group = interaction(.draw, SPEC), color = SPEC), alpha = 0.05) +
-  geom_line(data = threshold, aes(x = LGTHIN, y = probability_above_threshold)) +
-  scale_y_continuous(limits = c(0,1)) +
-  facet_wrap(~SPEC, scales = "free_x") +
-  geom_hline(yintercept = .5, color = "red", linetype = "dashed") +
+  geom_line(data = draw_sum, 
+            aes(x = LGTHIN, y = prob, group = interaction(.draw, species), color = species), 
+            alpha = 0.05, 
+            stat = "smooth", method = "loess", span = 0.3, se = FALSE) +  # Smoothing individual draws
+  geom_line(data = threshold, 
+            aes(x = LGTHIN, y = probability_above_threshold), 
+            stat = "smooth", method = "loess", span = 0.3, se = FALSE) +  # Smoothing average line
+  scale_y_continuous(limits = c(-0.01,1.01)) +
+  facet_wrap(~species, scales = "free_x") +
+  geom_hline(yintercept = 0.5, color = "red", linetype = "dashed") +
   labs(x = "Length (Inches)", 
        y = "Probability of Exceeding 0.2 ppm") +
   theme_bw() +
-  theme(legend.position = "none")
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12))
 ggsave("prob_exceeding.png", width = 5, height = 5)
 
-#lake specific variability 
+#lake specific variability prob of exceeding
 lakes <- hg.data %>% 
+  #generating xwalk back to original data from predicted data
   mutate(easting.factor = as.factor(easting),
          northing.factor = as.factor(northing),
          parent_dow = substr(DOW, 1, 6)) %>%
@@ -430,36 +511,49 @@ lakes <- hg.data %>%
   right_join(predictions, by = c("easting.factor",
                                  "northing.factor"))
 lakes.sum <- lakes %>% 
+  #creating a column that shows if the prediction is above .2
   mutate(above_threshold = .prediction > log(.2)) %>% 
-  group_by(parent_dow, SPEC, scaled_length) %>% 
+  #generating a prob for each lake, spec, length it exceeds the threshold across draws
+  group_by(parent_dow, species, scaled_length) %>% 
   summarise(prob = mean(above_threshold), .groups = 'drop') %>% 
-  left_join(length_stats, by = "SPEC") %>% 
+  left_join(length_stats, by = "species") %>% 
   mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
 
+#doing the same thing but getting the species level average prob
 species.sum <- lakes %>% 
   mutate(above_threshold = .prediction > log(.2)) %>% 
-  group_by(SPEC, scaled_length) %>% 
+  group_by(species, scaled_length) %>% 
   summarise(prob = mean(above_threshold), .groups = 'drop') %>% 
-  left_join(length_stats, by = "SPEC") %>% 
+  left_join(length_stats, by = "species") %>% 
   mutate(LGTHIN = (scaled_length*sd_length) + mean_length)
 
-#initial plot, play around with alpha in the future 
+#initial plot
 ggplot() +
-  stat_smooth(data = lakes.sum, aes(LGTHIN, prob, group = parent_dow, color = SPEC), geom = "smooth", se = F) +
-  stat_smooth(data = species.sum, aes(LGTHIN, prob), geom = "smooth", se = F, color = "black") +
+  geom_line(data = lakes.sum, aes(LGTHIN, prob, group = parent_dow, color = species), 
+              alpha = 0.1,
+            stat = "smooth", method = "loess", span = 0.3, se = FALSE) +
+  geom_line(data = species.sum, aes(LGTHIN, prob),
+            stat = "smooth", method = "loess", span = 0.3, se = FALSE) +
   geom_hline(yintercept = 0.5, linetype = "dashed") +
-  facet_wrap(~SPEC, scales = "free") +
+  facet_wrap(~species, scales = "free") +
   xlab("Length of Fish (inches)") +
-  ylab("Probability of Exceeding 0.2 ppm")
+  ylab("Probability of Exceeding 0.2 ppm")+
+  theme_bw() +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12))
+ggsave("lake_vary_hg.png", height = 5, width = 7, bg = "white", dpi = 600)
 
-
-#playing around with density
+#playing around with density using hex
 ggplot() +
-  stat_smooth(data = lakes.sum, aes(LGTHIN, prob, group = parent_dow, color = SPEC), geom = "smooth", se = FALSE) +
   geom_hline(yintercept = 0.5, linetype = "dashed") +
-  geom_hex(data = lakes.sum, aes(LGTHIN, prob), bins = 30, alpha = 0.5) +
-  scale_fill_gradient(low = "blue", high = "red") +
-  facet_wrap(~SPEC, scales = "free")
+  geom_hex(data = lakes.sum, aes(LGTHIN, prob), bins = 10, alpha = 0.7) +
+  scale_fill_viridis_c(option = "C") +  # Use viridis palette
+  facet_wrap(~species, scales = "free") +
+  theme_minimal() +
+  labs(x = "Length of Fish (inches)", y = "Probability of Exceeding 0.2 ppm")
+
+###########stopped here 9/26######################
 
 
 #leech lake specific
@@ -554,6 +648,11 @@ threshold %>%
   facet_wrap(~SPEC, scales = "free")
 
 #prob of average size
+hg.data %>% 
+  filter(SPEC == "WAE") %>% 
+  filter(LGTHIN == 15) %>% 
+  select(LGTHIN, scaled_length)
+
 pred_data_avg <- hg.data %>% 
   select(easting, 
          northing, 
@@ -623,12 +722,162 @@ hg.data %>%
   summarise(mean.length = mean(LGTHIN),
             n = n())
 
-#zebra mussel effect - generate some figures from zm lakes
-zm_lakes_pre_post <- hg.data %>% 
-  distinct(DOW, zm_sample) %>% 
-  group_by(DOW) %>% 
-  count() %>% 
-  filter(n > 1)
+#making predition data
+length_ranges <- hg.data %>% 
+  group_by(SPEC) %>% 
+  summarize(min_length = min(scaled_length), max_length = max(scaled_length))
+
+length_seq <- length_ranges %>% 
+  rowwise() %>% 
+  mutate(scaled_length = list(seq(min_length, max_length, length.out = 100))) %>% 
+  unnest(cols = c(scaled_length))
+
+pred_data <- hg.data %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample) %>% 
+  distinct() %>% 
+  drop_na() %>%
+  inner_join(length_seq, by = "SPEC")
+rm(length_seq, length_ranges)
+
+#memory intensive step
+predictions <- fit.gp %>% 
+  epred_draws(pred_data, ndraws = 100)
+
+length_stats <- hg.data %>% 
+  group_by(SPEC) %>% 
+  summarise(mean_length = mean(LGTHIN),
+            sd_length = sd(LGTHIN),
+            min_length = min(LGTHIN),
+            max_length = max(LGTHIN))
+
+predictions %>% 
+  left_join(length_stats, by = "SPEC") %>% 
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length) %>% 
+  ggplot(aes(x = LGTHIN, y = exp(.epred))) +
+  stat_lineribbon() +
+  geom_hline(yintercept = 0.2, linetype = "dashed") +
+  scale_fill_brewer(palette = "Reds") +
+  theme_bw() +
+  labs(x = "Length (inches)",
+       y = "Mercury Concentration (ppm)") +
+  theme(legend.position = "none")
+ggsave("wae_length_hg.png", height = 7, width = 5, dpi = 300, bg = "white")
+
+#walleye specific line
+predictions %>% 
+  filter(SPEC == "WAE") %>% 
+  left_join(length_stats, by = "SPEC") %>%
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length) %>%
+  group_by(LGTHIN, SPEC) %>% 
+  summarise(median=median(exp(.epred)), lci=quantile(exp(.epred), .025), uci=quantile(exp(.epred), 0.975)) %>% 
+  group_by(SPEC) %>%
+  mutate(smoothed_uci = predict(loess(uci ~ LGTHIN, span = 0.5)),
+         smoothed_lci = predict(loess(lci ~ LGTHIN, span = 0.5)),
+         smoothed_median = predict(loess(median ~ LGTHIN, span = 0.5))) %>%
+  ungroup() %>% 
+  ggplot() +
+  facet_wrap(~SPEC, scales='free') +
+  theme_bw() +
+  geom_ribbon(aes(x = LGTHIN, y = median, ymax = smoothed_uci, ymin = smoothed_lci), lwd = 0, alpha = .3) + # alpha is transparency
+  geom_line(lwd = 1, aes(x = LGTHIN, y = median)) + # center line of ribbon
+  geom_hline(yintercept = 0.2, linetype = "dashed") +
+  ylab("Mercury Concentration (ppm)") +
+  xlab("Fish Length (inches)") +
+  theme(strip.background = element_blank(),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.background = element_blank(),
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 13))
+ggsave("wae_length_hg_not_pretty.png", height = 7, width = 5, dpi = 300, bg = "white")
+
+#zebra mussel difference line
+predictions %>% 
+  left_join(length_stats, by = "SPEC") %>%
+  mutate(LGTHIN = (scaled_length*sd_length) + mean_length) %>%
+  group_by(LGTHIN, SPEC, zm_sample) %>% 
+  summarise(median=median(exp(.epred)), lci=quantile(exp(.epred), .025), uci=quantile(exp(.epred), 0.975)) %>% 
+  group_by(SPEC, zm_sample) %>%
+  mutate(smoothed_uci = predict(loess(uci ~ LGTHIN, span = 0.5)),
+         smoothed_lci = predict(loess(lci ~ LGTHIN, span = 0.5)),
+         smoothed_median = predict(loess(median ~ LGTHIN, span = 0.5))) %>%
+  ungroup() %>% 
+  mutate(SPEC = case_when(SPEC == "BLC" ~ "Black Crappie",
+                          SPEC == "BLG" ~ "Bluegill",
+                          SPEC == "LMB" ~ "Largemouth Bass",
+                          SPEC == "NOP" ~ "Northern Pike",
+                          SPEC == "WAE" ~ "Walleye",
+                          SPEC == "WTS" ~ "White Sucker",
+                          SPEC == "YEP" ~ "Yellow Perch",
+                          TRUE ~ "NA")) %>% 
+  ggplot() +
+  facet_wrap(~SPEC, scales='free') +
+  theme_bw() +
+  geom_ribbon(aes(x = LGTHIN, y = median, color = zm_sample, ymax = smoothed_uci, ymin = smoothed_lci, fill = zm_sample), lwd = 0, alpha = .3) + # alpha is transparency
+  geom_line(lwd = 1, aes(x = LGTHIN, y = median, color = zm_sample, lty = zm_sample)) + # center line of ribbon
+  scale_linetype_manual(values = c(1, 6), labels = c("Uninvaded", "Zebra mussel")) + # to tell it which line type you want
+  scale_colour_manual(values = c("#00CCCC", "#FF6666"), labels = c("Uninvaded", "Zebra mussel")) +
+  scale_fill_manual(values = c("#00CCCC", "#FF6666"), labels = c("Uninvaded", "Zebra mussel")) +
+  ylab("Mercury Concentration (ppm)") +
+  xlab("Fish Length (inches)") +
+  labs(fill = "Invasion status", lty = "Invasion status", color = "Invasion status", labels = c("Uninvaded", "Zebra Mussel")) +
+  theme(strip.background = element_blank(),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.background = element_blank(),
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 11))
+ggsave("species_length_zm.png", height = 7, width = 5, dpi = 300, bg = "white")
+
+
+#conditional effects for zm
+pred_data2 <- hg.data %>%
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample) %>% 
+  distinct() %>% 
+  drop_na() %>%
+  mutate(scaled_length = 0)
+
+invasion_average_fish <- fit.gp %>% 
+  epred_draws(pred_data2, ndraws = 100) 
+
+invasion_average_fish %>% 
+  group_by(SPEC, zm_sample) %>% 
+  summarise(median=median(exp(.epred)), lci=quantile(exp(.epred), .025), uci=quantile(exp(.epred), 0.975)) %>% 
+  ungroup() %>%  
+  ggplot() +
+  geom_pointinterval(aes(y = zm_sample, x = median, xmin = lci, xmax = uci, colour=zm_sample)) +
+  xlab("Mercury Concentration (ppm)")+
+  ylab("")+
+  guides(color = "none") +
+  scale_color_manual("", values=c("#00BFC4","#F8766D")) +
+  facet_wrap(~SPEC, scales="free") +
+  coord_flip() +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.background = element_blank(),
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 11)) 
+ggsave("species_hg_epred_zm_conditional.png", height = 7, width = 5, dpi = 600, bg = "white")
+
+plot(conditional_effects(fit.gp))
 ```
 
 
