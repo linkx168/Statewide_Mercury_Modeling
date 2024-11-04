@@ -10,7 +10,7 @@ editor_options:
 The general structure of this markdown
 1. load in packages from the library
 2. read in mercury data and attach cov data 
-3. prediction model using brms and gussian processes 
+3. prediction model using brms and Gaussian processes 
 4. old code used to explore data and/or old analysis 
 
 #Library
@@ -199,14 +199,14 @@ hg.model <- hg %>%
 
 #GP with all lakes
 The general structure of this chunk
-1. filter MN state hg data relivent to prediction modeling
+1. filter MN state hg data reverent to prediction modeling
   -notes on the filtering are included below
 2. fitting model with brms
 3. some generic model summary and checks
 4. exploring residuals 
 5. creating products based on the model
    -prob that a fish at a given length is over the threshold 
-   -lenght vs hg plots
+   -length vs hg plots
    -map of hg concentrations of an average size fish throughout the state of MN
 ```{r}
 ####################filtering hg data for predictive modeling##################
@@ -439,8 +439,8 @@ threshold <- predictions %>%
   mutate(is_above_threshold = .prediction > log(0.2)) %>% 
   #This step creates a probability across all lakes for each spec-length-draw
   group_by(species, scaled_length, .draw) %>% 
-  summarise(prob = mean(is_above_threshold), .groups = 'drop') %>%   
-  #this step sums each spec-length across draws so that we get a variablity in the prob like for the state
+  summarise(prob = mean(is_above_threshold), .groups = 'drop')  %>% 
+  #this step sums each spec-length across draws so that we get a variability in the prob like for the state
   group_by(species, scaled_length) %>% 
   summarise(probability_above_threshold = mean(prob),
             lower_ci = quantile(prob, 0.025),
@@ -878,6 +878,232 @@ invasion_average_fish %>%
 ggsave("species_hg_epred_zm_conditional.png", height = 7, width = 5, dpi = 600, bg = "white")
 
 plot(conditional_effects(fit.gp))
+```
+
+#Testing lscale term without covariates 
+```{r}
+####################filtering hg data for predictive modeling##################
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  filter(!is.na(clarity)) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_logit_urban = c(scale(logit_urban)),
+         scaled_logit_ag = c(scale(logit_ag)),
+         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3)) 
+rm(hg, hg.model)
+
+####################fitting model###########################
+fit.gp <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                gp(easting, northing, gr = T, scale = F),
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+#saveRDS(fit.gp, "statewide_gp_lscale_test.rds")
+fit.gp <- readRDS("statewide_gp_lscale_test.rds")
+
+#############summary###################################
+summary(fit.gp)
+plot(fit.gp)
+```
+
+#Leave the recent year out
+```{r}
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  filter(!is.na(clarity)) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_logit_urban = c(scale(logit_urban)),
+         scaled_logit_ag = c(scale(logit_ag)),
+         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3)) 
+rm(hg, hg.model)
+
+#filtering out 2023
+hg.data.loo <- hg.data %>% 
+  filter(!(YEARCOLL %in% c("2023"))) 
+
+loo <- hg.data %>% 
+  filter(YEARCOLL == "2023")
+
+summary_counts <- data.frame(
+  data = c("original", "loo"),
+  count = c(nrow(hg.data), nrow(hg.data.loo))
+)
+
+summary_year <- hg.data %>% 
+  group_by(YEARCOLL) %>% 
+  summarise(n_original = n()) %>% 
+  left_join(hg.data.loo %>% 
+              group_by(YEARCOLL) %>% 
+              summarise(n_loo = n()))
+
+summary_numeric <- bind_rows(
+  hg.data %>% 
+    summarise(across(where(is.numeric), list(mean = mean, sd = sd, min = min, max = max), .names = "{.col}_{.fn}")) %>%
+    mutate(data = "original"),
+  
+  hg.data.loo %>% 
+    summarise(across(where(is.numeric), list(mean = mean, sd = sd, min = min, max = max), .names = "{.col}_{.fn}")) %>%
+    mutate(dataset = "loo")
+)
+
+summary_categorical <- bind_rows(
+  hg.data %>%
+    summarise(across(where(is.character), ~ n_distinct(.), .names = "Unique_{.col}")) %>%
+    mutate(data = "original"),
+  
+  hg.data.loo %>%
+    summarise(across(where(is.character), ~ n_distinct(.), .names = "Unique_{.col}")) %>%
+    mutate(data = "loo")
+)
+
+rm(summary_categorical, summary_counts, summary_numeric, summary_year)
+
+lost_lakes <- hg.data %>% 
+  anti_join(hg.data.loo, by = "DOW") %>% 
+  distinct(DOW)
+
+lost_species <- hg.data %>% 
+  anti_join(hg.data.loo, by = "SPEC") %>% 
+  distinct(SPEC)
+rm(lost_lakes, lost_species)
+
+
+####################fitting model###########################
+rm(hg.data)
+
+fit.gp <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, gr = T, scale = F),
+                     data = hg.data.loo,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+#saveRDS("statewide_gp_loo_RecentYear.rds")
+fit.gp_loo <- readRDS("statewide_gp_loo_RecentYear.rds")
+
+#basic model checks
+plot(fit.gp_loo)
+summary(fit.gp_loo)
+#plot(conditional_effects(fit.gp, ndraws = 100))
+
+########how well do we predict 2023 when it was left out?###################
+
+pred_data <- loo %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_length,
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample) 
+
+#add predictive draws
+predictions <- pred_data %>% 
+  add_predicted_draws(fit.gp, ndraws = 100) 
+
+predictions_summary <- predictions %>% 
+  median_qi()
+
+#joins predicted results to the actual results 
+loo <- loo %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_length,
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample,
+         HGPPM) %>% 
+  left_join(predictions)
+
+#plots that show how well we predicted our result 
+loo %>% 
+  ggplot() +
+  geom_point(aes(.predicted, HGPPM)) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  theme_minimal()
+
+#make plot that has the predictive distribtuions of each point compared to the actual value
+```
+when this model finishes running:
+1. read back in hg.data
+2. filter to get only the data that is left out
+3. save the rds model file
+4. make predictions using the loo data
+5. compare predictions to the actual observed data
+
+#Leave out lakes
+```{r}
+
+```
+
+#Leave out species 
+```{r}
+
 ```
 
 
