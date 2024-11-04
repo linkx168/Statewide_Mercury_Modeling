@@ -299,7 +299,7 @@ hg_explore %>%
 
 #hg correlation for each species
 ```{r}
-length.correction <- hg_explore %>% 
+length.correction <- hg %>% 
   group_by(SPEC) %>% 
   mutate(mean.length = mean(LGTHIN)) %>% 
   ungroup() %>% 
@@ -350,8 +350,8 @@ cor_matrix_plot <- cor(corplot.dat_clean %>%
                          select(NOP, WAE, SMB, LMB, BLG, WTS, CAP, YEP, BLC, CCF, CIS, TLC), use = "pairwise.complete.obs")
 
 cor_long %>% 
-  filter(Var1 %in% c("NOP", "WAE", "SMB", "LMB", "BLG", "WTS", "CAP", "YEP", "BLC", "CCF", "CIS", "TLC"),
-         Var2 %in% c("NOP", "WAE", "SMB", "LMB", "BLG", "WTS", "CAP", "YEP", "BLC", "CCF", "CIS", "TLC"),
+  filter(Var1 %in% c("NOP", "WAE",  "LMB", "BLG", "WTS",  "YEP", "BLC"),
+         Var2 %in% c("NOP", "WAE",  "LMB", "BLG", "WTS",  "YEP", "BLC"),
          value > 0) %>% 
   mutate(value_2 = round(value, 2)) %>% 
 ggplot(aes(x = Var1, y = Var2, fill = value)) +
@@ -359,9 +359,10 @@ ggplot(aes(x = Var1, y = Var2, fill = value)) +
   scale_fill_gradient(high = munsell::mnsl("5P 2/12"), low = munsell::mnsl("5P 7/12"))+
   geom_text(aes(Var2, Var1, label = value_2), color = "black", size = 4) +
   theme_minimal() +
-  labs(title = "Correlation between Species",
-       x = "Species 1",
-       y = "Species 2")
+  labs(x = "Species 1",
+       y = "Species 2") +
+  theme(legend.position = "none")
+ggsave("spec_matrix.png", height = 7, width = 7, bg = "white", dpi = 300)
 
 #a few lm models
 fit.1 <- lm(WAE ~ NOP, data = stnd)
@@ -378,7 +379,9 @@ stnd %>%
   ggplot() +
   geom_point(aes(NOP, WAE)) +
   geom_smooth(aes(NOP, WAE), method = lm) +
-  geom_abline(intercept = 0, slope = 1, color = "red")
+  geom_abline(intercept = 0, slope = 1, color = "red") +
+  theme_bw()
+ggsave("nop_wae_cor.png", height = 7, width = 7, bg = "white", dpi = 300)
 
 stnd %>% 
   filter(!is.na(TLC) & !is.na(CAP)) %>% 
