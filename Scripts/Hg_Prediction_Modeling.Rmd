@@ -631,8 +631,142 @@ zm_lakes_pre_post <- hg.data %>%
   filter(n > 1)
 ```
 
-
 ###########All code below is exploratory##########################
+
+#GLIFWC
+```{r}
+glifwc <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg.csv")) %>% 
+  rename(STATE = state,
+         WATERWAY = waterbody,
+         DATECOL2 = sample_date,
+         YEARCOLL = year,
+         SPEC = spp_code,
+         LGTHIN = length_in,
+         HGPPM = hg_ppm,
+         WTKG = wt_lbs,
+         AGE = age) %>% 
+  mutate(original_file = "glifwc") %>% 
+  select(STATE,
+         WATERWAY,
+         county,
+         DATECOL2,
+         YEARCOLL,
+         SPEC,
+         LGTHIN,
+         WTKG,
+         AGE,
+         HGPPM,
+         original_file) %>% 
+  mutate(WATERWAY = str_remove(WATERWAY, " L$"))
+
+mn_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  filter(DOWID != "16000100") %>% 
+  mutate(STATE = "MN") %>% 
+  mutate(original_file = "mn_state") %>% 
+  select(STATE,
+         WATERWAY,
+         DATECOL2,
+         YEARCOLL,
+         SPEC,
+         LGTHIN,
+         WTKG,
+         AGE,
+         HGPPM,
+         original_file,
+         OWNER) %>% 
+  mutate(DATECOL2 = as.Date(DATECOL2, format = "%m/%d/%Y"),
+         YEARCOLL = year(DATECOL2)) 
+
+
+#row bind the data
+comb_hg <- bind_rows(glifwc, mn_data)
+rm(glifwc, mn_data)
+
+#do glifwc samples exist in the MN data?
+mn_glifwc_samples <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
+  filter(OWNER == "GLIFWC")
+#there are some
+
+mn_glifwc_samples %>% 
+  group_by(WATERWAY, SPEC, YEARCOLL) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#samples from glifwc in the mn data are mostly walleye from 
+
+#are there duplicates?
+dups <- comb_hg %>% 
+  filter(SPEC == "WAE") %>% 
+  filter(STATE == "MN") %>% 
+  select(WATERWAY, YEARCOLL, LGTHIN, HGPPM) %>% 
+  group_by(WATERWAY, YEARCOLL, LGTHIN, HGPPM) %>% 
+  filter(n() > 1) %>% 
+  ungroup()
+
+dups <- comb_hg %>% 
+  semi_join(dups) %>% 
+  arrange(WATERWAY, YEARCOLL, LGTHIN, HGPPM)
+#looks like most of the duplicates are from mn data containing the glifwc data
+
+dups %>% 
+  mutate(HGPPM = as.character(round(HGPPM, 3))) %>%
+  group_by(WATERWAY, YEARCOLL, LGTHIN, HGPPM) %>%  
+  summarise(n = n_distinct(original_file))  %>% 
+  filter(n >1) 
+#looks like 304 of the glifwic minnesota samples are duplicates 
+#there are also some duplicates within the mn data base - are those really two samples (check sample id)
+
+rm(mn_glifwc_samples, dups)
+
+comb_hg %>% 
+  group_by(STATE) %>% 
+  count()
+
+comb_hg %>% 
+  group_by(original_file, STATE, SPEC) %>% 
+  count() %>% 
+  arrange(SPEC) %>% 
+  print(n = nrow(.))
+#glifwc only sent us walleye data
+
+comb_hg %>% 
+  filter(original_file == "glifwc") %>% 
+  group_by(STATE) %>% 
+  summarise(n_lakes = n_distinct(WATERWAY))
+
+comb_hg %>% 
+  filter(original_file == "glifwc") %>%
+  group_by(STATE, WATERWAY, YEARCOLL) %>% 
+  count() %>% 
+  group_by(STATE) %>% 
+  summarise(average_n = mean(n))
+
+comb_hg %>%
+  group_by(WATERWAY, YEARCOLL) %>%
+  filter(n_distinct(original_file) > 1) %>%
+  ungroup() %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, log(HGPPM), color = original_file)) +
+  facet_wrap(WATERWAY~YEARCOLL, scales = "free")
+#so many combos its hard to make much of anything
+
+comb_hg %>%
+  filter(SPEC == "WAE") %>% 
+  group_by(WATERWAY, YEARCOLL) %>%
+  filter(n_distinct(original_file) > 1) %>%
+  ungroup() %>% 
+  filter(WATERWAY == "MILLE LACS") %>% 
+  filter(YEARCOLL == "1996") %>% 
+  ggplot() +
+  geom_jitter(aes(LGTHIN, log(HGPPM), color = original_file)) +
+  facet_wrap(~YEARCOLL, scales = "free")
+#these are duplicates, have to jitter to even see the glifwc samples 
+```
+
 
 #Exploring Predictors
 ```{r}
