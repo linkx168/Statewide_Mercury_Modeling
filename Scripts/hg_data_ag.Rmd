@@ -1,0 +1,212 @@
+---
+title: "Hg_data_ag"
+author: "Denver Link"
+date: "2024-11-04"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Library
+```{r}
+library(tidyverse)
+library(mwlaxeref)
+library(mnsentinellakes)
+```
+
+
+# Data
+```{r}
+#mercury
+mn_dnr <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv"))
+
+glifwc <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg.csv"))
+
+#covariate
+mglp <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MGLP_landuse_clarity_color_mercury_MI_MN_WI.csv"))
+
+#mn zm data
+mn_zm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv"))
+```
+
+# Ag
+```{r}
+#get glifwc and mn data together
+glifwc_merge <- glifwc %>% 
+  #for the sake of ease I'm going to assume all mn samples are duplicates and throw them out
+  filter(state != "MN")
+
+mn_dnr_merge <- mn_dnr %>% 
+  #removes samples with no hg, length, or dow data
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   
+  #only taking lake samples
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
+  #fixing dowid
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  #removing great lake
+  filter(DOWID != "16000100") %>% 
+  #generating nhdid
+  local_to_nhdhr(from_colname = "DOWID", states = "mn") %>% 
+  #adding prefix to nhdid
+  mutate(nhdhr.id = paste0("nhdhr_", nhdhr.id)) %>%
+  #adding lagos
+  local_to_lagos(from_colname = "DOWID", states = "mn") %>% 
+  #selecting columns for rowbind
+  rename(waterbody = WATERWAY,
+         year = YEARCOLL,
+         spp_code = SPEC,
+         length_in = LGTHIN,
+         wt_lbs = WTLB,
+         age = AGE,
+         hg_ppm = HGPPM,
+         state_id = DOWID,
+         sample_type = ANATHG,
+         num_fish_in_sample = NOFISH,
+         sex = SEX,
+         hg_code = HGCODE,
+         hg_lab = HGLAB,
+         hg_notes = HGCMMT,
+         lagoslakeid = lagos.id) %>% 
+  mutate(state = "MN",
+         county = NA,
+         sample_date = mdy(DATECOL2)) %>% 
+  select(state,
+         county,
+         waterbody,
+         state_id,
+         lagoslakeid,
+         nhdhr.id,
+         lagoslakeid,
+         sample_date,
+         year,
+         spp_code,
+         sample_type,
+         num_fish_in_sample,
+         length_in,
+         wt_lbs,
+         age,
+         sex,
+         hg_ppm,
+         hg_code,
+         hg_lab,
+         hg_notes)
+
+hg_data <- bind_rows(glifwc_merge, mn_dnr_merge)
+rm(mn_dnr,
+   mn_dnr_merge,
+   glifwc,
+   glifwc_merge)
+
+mglp_merge <- mglp %>% 
+  lagos_to_nhdhr(from_colname = "lagoslakeid") %>% 
+  mutate(nhdhr.id = paste0("nhdhr_", nhdhr.id)) %>% 
+  select(nhdhr.id,
+         lake_area_ha,
+         nws_area_ha,
+         clarity_m_Corson_Dosch,
+         secchi_depth_m_LAGOS_LIMNO,
+         colora_pcu_LAGOS_LIMNO,
+         colort_pcu_LAGOS_LIMNO,
+         nws_nlcd_devhi24_pct,
+         nws_nlcd_fordec41_pct,
+         nws_nlcd_wetemerg95_pct)
+
+hg_data <- hg_data %>% 
+  left_join(mglp_merge, by = "nhdhr.id")
+rm(mglp,
+   mglp_merge)
+
+#adding zm data
+mn_zm_merge <- mn_zm %>% 
+  filter(!is.na(MNDOW_ID)) %>% 
+  mutate(DOW = as.character(gsub("mndow_", "", MNDOW_ID)),
+         nhdid = NHD_ID) %>% 
+  select(DOW,
+         Year_Infested)  %>% 
+  mutate(zm_lag_year_infested = Year_Infested +2) %>% 
+  rename(state_id = DOW,
+         year_infested_zm = Year_Infested,
+         year_infested_zm_lag = zm_lag_year_infested) 
+
+hg_data <- hg_data %>% 
+  left_join(mn_zm_merge, by = "state_id") %>% 
+  mutate(zm_lake = case_when(is.na(year_infested_zm) ~ "n",
+                             TRUE ~ "y"),
+         zm_sample_lag = case_when(year_infested_zm_lag <= year ~ "y",
+                               TRUE ~ "n"),
+         time_since_invasion = year - year_infested_zm)
+rm(mn_zm, mn_zm_merge)
+```
+
+#products
+```{r}
+#mn data with mglp and zm
+mn_data <- hg_data %>% 
+  filter(!is.na(state_id)) %>% 
+  select(state, 
+         county, 
+         waterbody,
+         state_id,
+         nhdhr.id,
+         lagoslakeid,
+         lake_area_ha,
+         nws_area_ha,
+         clarity_m_Corson_Dosch,
+         secchi_depth_m_LAGOS_LIMNO,
+         colora_pcu_LAGOS_LIMNO,
+         colort_pcu_LAGOS_LIMNO,
+         nws_nlcd_devhi24_pct,
+         nws_nlcd_fordec41_pct,
+         nws_nlcd_wetemerg95_pct,
+         zm_lake,
+         year_infested_zm,
+         year_infested_zm_lag,
+         zm_sample_lag,
+         time_since_invasion,
+         sample_date,
+         year,
+         sample_type,
+         num_fish_in_sample,
+         spp_code,
+         length_in,
+         wt_lbs,
+         sex,
+         age,
+         hg_ppm,
+         hg_code,
+         hg_lab,
+         hg_notes)
+write_csv(mn_data, "mn_lakes_hg_covariates.csv")
+```
+
+
+# data coverage
+```{r}
+hg_data %>% 
+  #currently removing all na nhdhr so that I do not get glifwc data - only looking at mglp coverage in MN
+  filter(!is.na(nhdhr.id)) %>% 
+  distinct(nhdhr.id, 
+           lake_area_ha,
+           nws_area_ha,
+           clarity_m_Corson_Dosch,
+           secchi_depth_m_LAGOS_LIMNO,
+           colora_pcu_LAGOS_LIMNO,
+           colort_pcu_LAGOS_LIMNO,
+           nws_nlcd_devhi24_pct,
+           nws_nlcd_fordec41_pct,
+           nws_nlcd_wetemerg95_pct) %>% 
+  summarize(across(everything(), ~ mean(is.na(.)) * 100, .names = "na_count_{.col}")) %>% 
+  pivot_longer(cols = everything(), 
+               names_to = "parameter", 
+               values_to = "na_percentage") %>%
+  mutate(parameter = str_remove(parameter, "na_percent_"))
+
+hg_data %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  filter(is.na(nws_nlcd_fordec41_pct)) %>% 
+  distinct(waterbody,
+           nhdhr.id,
+           #lagoslakeid,
+           state_id) %>% 
+  print(n = nrow(.))
+```
