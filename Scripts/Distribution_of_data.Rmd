@@ -880,3 +880,32 @@ clarity <- read_csv("Data/MN_sat_clarity.csv")
 glimpse(clarity)
 ```
 
+#pool 3 mississippi river
+```{r}
+pool_3 <- hg %>% 
+  filter(str_detect(LOCATION, "POOL 3") | str_detect(LOCATION, "Pool 3"))
+
+pool_3 %>% 
+  filter(SPEC == "WAE") %>% 
+  ggplot() +
+  geom_jitter(aes(YEARCOLL, HGPPM)) +
+  geom_hline(yintercept = .2)
+
+pool_3 %>% 
+  filter(SPEC == "WAE") %>% 
+  ggplot() +
+  geom_boxplot(aes(as.factor(YEARCOLL), HGPPM)) +
+  geom_hline(yintercept = .2)
+
+pool_3 %>% 
+  filter(SPEC == "WAE" & YEARCOLL == "2018") %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, HGPPM))
+
+pool_3 %>% 
+  filter(SPEC == "WAE" & YEARCOLL > 2010) %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, HGPPM)) +
+  geom_smooth(aes(LGTHIN, HGPPM))
+```
+
