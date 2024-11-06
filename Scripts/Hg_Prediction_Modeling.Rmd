@@ -1036,7 +1036,7 @@ fit.gp <- brm(log_hg ~
                      chains = 3,
                      family = gaussian(),
                      cores = 12)
-#saveRDS("statewide_gp_loo_RecentYear.rds")
+#saveRDS(fit.gp, "statewide_gp_loo_RecentYear.rds")
 fit.gp_loo <- readRDS("statewide_gp_loo_RecentYear.rds")
 
 #basic model checks
@@ -1047,7 +1047,7 @@ summary(fit.gp_loo)
 ########how well do we predict 2023 when it was left out?###################
 
 pred_data <- loo %>% 
-  select(easting, 
+  distinct(easting, 
          northing, 
          SPEC, 
          scaled_length,
@@ -1057,8 +1057,211 @@ pred_data <- loo %>%
          scaled_logit_urban,
          scaled_logit_ag,
          zm_sample) 
+#there are some duplicate spec-lake-length, I use the distinct call so that I don't have duplicated data and make more than one predication for the same info
 
 #add predictive draws
+predictions <- pred_data %>% 
+  add_predicted_draws(fit.gp_loo, ndraws = 100) 
+
+predictions_summary <- predictions %>% 
+  median_qi()  %>% 
+  distinct(easting, 
+         northing, 
+         SPEC, 
+         scaled_length,
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample,
+         .keep_all = T)
+
+#joins predicted results to the actual results 
+loo_with_prediction <- loo %>% 
+  distinct(easting, 
+         northing, 
+         SPEC, 
+         scaled_length,
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample,
+         log_hg) %>% 
+  left_join(predictions_summary)
+#we have two points that are duplicates of each other at different leaves (the same length-spec-lake AND the same length-spec-lake-hgppm). I create only one prediction for unique length-spec-lake values, but the same predication gets applied to all hgppm values 
+
+
+#plots that show how well we predicted our result 
+loo_with_prediction %>% 
+  ggplot() +
+  geom_point(aes(log_hg, .prediction)) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  theme_minimal()
+
+error_metrics <- loo_with_prediction %>%
+  mutate(
+    error = abs(log_hg - .prediction),
+    squared_error = (log_hg - .prediction)^2,
+    within_interval = ifelse(log_hg >= .lower & log_hg <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+error_metrics
+
+error_metrics_backtransformed <- loo_with_prediction %>%
+  mutate(
+    observed_original = exp(log_hg),
+    prediction_original = exp(.prediction),
+    lower_original = exp(.lower),
+    upper_original = exp(.upper),
+    error_original = abs(observed_original - prediction_original),
+    squared_error_original = (observed_original - prediction_original)^2,
+    within_interval_original = ifelse(observed_original >= lower_original & observed_original <= upper_original, 1, 0),
+    interval_width_original = upper_original - lower_original
+  ) %>%
+  summarise(
+    MAE_original = mean(error_original, na.rm = TRUE),
+    RMSE_original = sqrt(mean(squared_error_original, na.rm = TRUE)),
+    coverage_original = mean(within_interval_original, na.rm = TRUE),
+    avg_interval_width_original = mean(interval_width_original, na.rm = TRUE)
+  )
+error_metrics_backtransformed
+
+#plot
+loo_with_prediction %>%
+  mutate(
+    observed_orig = exp(log_hg),
+    predicted_orig = exp(.prediction),
+    lower_orig = exp(.lower),
+    upper_orig = exp(.upper)
+  ) %>% 
+  group_by(SPEC) %>% 
+  mutate(.row = row_number()) %>% 
+ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = lower_orig, ymax = upper_orig), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = predicted_orig), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = observed_orig), color = "black", size = 2, shape = 17) +
+  facet_wrap(~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentration (original scale)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  scale_color_manual(values = c("Prediction" = "blue", "Observed" = "red")) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top") +
+  scale_y_log10() 
+```
+when this model finishes running:
+1. read back in hg.data
+2. filter to get only the data that is left out
+3. save the rds model file
+4. make predictions using the loo data
+5. compare predictions to the actual observed data
+
+#Leave out some specs of some lakes 
+```{r}
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  filter(!is.na(clarity)) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_logit_urban = c(scale(logit_urban)),
+         scaled_logit_ag = c(scale(logit_ag)),
+         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3)) 
+rm(hg, hg.model)
+
+#filtering out spec-lake combinations
+loo_spec_lakes <- hg.data %>% 
+  distinct(SPEC, DOW) %>% 
+  sample_frac(0.15)
+
+hg.data.loo <- hg.data %>% 
+  anti_join(loo_spec_lakes, by = c("SPEC", "DOW"))
+
+#summary of samples that were left out
+loo.samples <- hg.data %>% 
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+  summarise(avg_hg = mean(HGPPM),
+            wae = sum(SPEC == "WAE"),
+            nop = sum(SPEC == "NOP"),
+            spec_else = sum(SPEC != "WAE" | SPEC != "NOP"),
+            zm_samples = sum(zm_sample == "y"),
+            n = n())
+
+loo.lakes <- hg.data %>% 
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  summarise(avg_size = mean(area),
+            avg_wetland = mean(Percent_Wetland),
+            avg_urban = mean(Percent_Urban),
+            zm_lake = sum(zm_sample == "y"),
+            n = n())
+
+#modeling
+fit.gp <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, gr = T, scale = F),
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+
+#summary
+summary(fit.gp)
+
+#how well can we predict left out samples?
+pred_data <- hg.data %>% 
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+  select(easting, 
+         northing, 
+         SPEC, 
+         scaled_length,
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample)
+
 predictions <- pred_data %>% 
   add_predicted_draws(fit.gp, ndraws = 100) 
 
@@ -1066,7 +1269,8 @@ predictions_summary <- predictions %>%
   median_qi()
 
 #joins predicted results to the actual results 
-loo <- loo %>% 
+loo <- hg.data %>%
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
   select(easting, 
          northing, 
          SPEC, 
@@ -1086,25 +1290,8 @@ loo %>%
   geom_point(aes(.predicted, HGPPM)) +
   geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
   theme_minimal()
-
-#make plot that has the predictive distribtuions of each point compared to the actual value
-```
-when this model finishes running:
-1. read back in hg.data
-2. filter to get only the data that is left out
-3. save the rds model file
-4. make predictions using the loo data
-5. compare predictions to the actual observed data
-
-#Leave out lakes
-```{r}
-
 ```
 
-#Leave out species 
-```{r}
-
-```
 
 
 ###########All code below is exploratory##########################
