@@ -1209,23 +1209,25 @@ hg.data.loo <- hg.data %>%
   anti_join(loo_spec_lakes, by = c("SPEC", "DOW"))
 
 #summary of samples that were left out
-loo.samples <- hg.data %>% 
+hg.data %>% 
   semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
   summarise(avg_hg = mean(HGPPM),
             wae = sum(SPEC == "WAE"),
             nop = sum(SPEC == "NOP"),
-            spec_else = sum(SPEC != "WAE" | SPEC != "NOP"),
+            spec_else = sum(SPEC != "WAE" & SPEC != "NOP"),
             zm_samples = sum(zm_sample == "y"),
             n = n())
 
-loo.lakes <- hg.data %>% 
+hg.data %>% 
   semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
   distinct(DOW, .keep_all = T) %>% 
   summarise(avg_size = mean(area),
             avg_wetland = mean(Percent_Wetland),
             avg_urban = mean(Percent_Urban),
             zm_lake = sum(zm_sample == "y"),
-            n = n())
+            n_lakes = n_distinct(DOW))
+
+#are there any lakes totally removed?
 
 #modeling
 fit.gp <- brm(log_hg ~ 
@@ -1238,12 +1240,14 @@ fit.gp <- brm(log_hg ~
                 scaled_log_area + 
                 zm_sample +
                 gp(easting, northing, gr = T, scale = F),
-                     data = hg.data,
+                     data = hg.data.loo,
                      iter = 10000,
                      warmup = 500,
                      chains = 3,
                      family = gaussian(),
                      cores = 12)
+#saveRDS(fit.gp, "statewide_hg_loo_spec_lake.rds")
+fit.gp <- readRDS("statewide_hg_loo_spec_lake.rds")
 
 #summary
 summary(fit.gp)
@@ -1251,7 +1255,7 @@ summary(fit.gp)
 #how well can we predict left out samples?
 pred_data <- hg.data %>% 
   semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
-  select(easting, 
+  distinct(easting, 
          northing, 
          SPEC, 
          scaled_length,
@@ -1260,7 +1264,7 @@ pred_data <- hg.data %>%
          scaled_log_area,
          scaled_logit_urban,
          scaled_logit_ag,
-         zm_sample)
+         zm_sample) 
 
 predictions <- pred_data %>% 
   add_predicted_draws(fit.gp, ndraws = 100) 
@@ -1269,9 +1273,9 @@ predictions_summary <- predictions %>%
   median_qi()
 
 #joins predicted results to the actual results 
-loo <- hg.data %>%
+loo_with_prediction <- hg.data %>%
   semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
-  select(easting, 
+  distinct(easting, 
          northing, 
          SPEC, 
          scaled_length,
@@ -1281,15 +1285,214 @@ loo <- hg.data %>%
          scaled_logit_urban,
          scaled_logit_ag,
          zm_sample,
-         HGPPM) %>% 
-  left_join(predictions)
+         log_hg) %>% 
+  left_join(predictions_summary)
 
 #plots that show how well we predicted our result 
-loo %>% 
+loo_with_prediction %>% 
   ggplot() +
-  geom_point(aes(.predicted, HGPPM)) +
+  geom_point(aes(log_hg, .prediction)) +
   geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
   theme_minimal()
+
+error_metrics <- loo_with_prediction %>%
+  mutate(
+    error = abs(log_hg - .prediction),
+    squared_error = (log_hg - .prediction)^2,
+    within_interval = ifelse(log_hg >= .lower & log_hg <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+error_metrics
+rm(error_metrics)
+
+#percentage of median predictions being off by a threshold (.1)
+loo_with_prediction %>%   
+  mutate(
+    observed_orig = exp(log_hg),
+    predicted_orig = exp(.prediction),
+    diff = predicted_orig - observed_orig,
+    abs_diff = abs(diff)
+  ) %>%
+    group_by(SPEC) %>% 
+  summarise(n_within_1 = sum(abs_diff < 0.1),
+            n_within_05 = sum(abs_diff < 0.05),
+            n_within_01 = sum(abs_diff <0.01),
+            n = n()) %>% 
+  mutate(per_within_1 = n_within_1 / n *100,
+            per_within_05 = n_within_05 / n * 100,
+            per_within_01 = n_within_01 / n * 100)
+
+error_metrics_backtransformed <- loo_with_prediction %>%
+  mutate(
+    observed_original = exp(log_hg),
+    prediction_original = exp(.prediction),
+    lower_original = exp(.lower),
+    upper_original = exp(.upper),
+    error_original = abs(observed_original - prediction_original),
+    squared_error_original = (observed_original - prediction_original)^2,
+    within_interval_original = ifelse(observed_original >= lower_original & observed_original <= upper_original, 1, 0),
+    interval_width_original = upper_original - lower_original
+  ) %>%
+  group_by(SPEC) %>% 
+  summarise(
+    MAE_original = mean(error_original, na.rm = TRUE),
+    RMSE_original = sqrt(mean(squared_error_original, na.rm = TRUE)),
+    coverage_original = mean(within_interval_original, na.rm = TRUE),
+    avg_interval_width_original = mean(interval_width_original, na.rm = TRUE)
+  )
+error_metrics_backtransformed
+rm(error_metrics_backtransformed)
+
+#plot
+loo_with_prediction %>%
+  mutate(
+    observed_orig = exp(log_hg),
+    predicted_orig = exp(.prediction),
+    lower_orig = exp(.lower),
+    upper_orig = exp(.upper)
+  ) %>% 
+  group_by(SPEC) %>% 
+  arrange(observed_orig) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = lower_orig, ymax = upper_orig), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = predicted_orig), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = observed_orig), color = "black", size = 2, shape = 17) +
+  facet_wrap(~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentration (original scale)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  scale_color_manual(values = c("Prediction" = "blue", "Observed" = "red")) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top") +
+  scale_y_log10()
+ggsave("ind_pred_spec_lake.png", dpi = 600, width = 11, height = 7, bg = "white")
+
+loo_with_prediction %>%
+  mutate(
+    observed_orig = exp(log_hg),
+    predicted_orig = exp(.prediction),
+    lower_orig = exp(.lower),
+    upper_orig = exp(.upper)
+  ) %>% 
+  group_by(SPEC) %>% 
+  arrange(observed_orig) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  group_by(SPEC) %>% 
+  sample_frac(.1) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = lower_orig, ymax = upper_orig), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = predicted_orig), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = observed_orig), color = "black", size = 2, shape = 17) +
+  facet_wrap(~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentration (original scale)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  scale_color_manual(values = c("Prediction" = "blue", "Observed" = "red")) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top") +
+  scale_y_log10()
+ggsave("ind_pred_spec_lake_sample.png", dpi = 600, width = 11, height = 7, bg = "white")
+
+loo_with_prediction %>%
+  mutate(
+    observed_orig = exp(log_hg),
+    predicted_orig = exp(.prediction),
+    lower_orig = exp(.lower),
+    upper_orig = exp(.upper)
+  ) %>% 
+  group_by(SPEC) %>% 
+  arrange(predicted_orig) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = lower_orig, ymax = upper_orig), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = predicted_orig), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = observed_orig), color = "black", size = 2, shape = 17, alpha = .5) +
+  facet_wrap(~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentration (original scale)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  scale_color_manual(values = c("Prediction" = "blue", "Observed" = "red")) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top") +
+  scale_y_log10()
+ggsave("ind_pred_spec_lake_pred_order.png", dpi = 600, width = 11, height = 7, bg = "white")
+
+#how off are we on average?
+loo_with_prediction %>%
+  mutate(
+    observed_orig = exp(log_hg),
+    predicted_orig = exp(.prediction),
+    diff = predicted_orig - observed_orig
+  ) %>% 
+  ggplot() +
+  geom_histogram(aes(diff,)) +
+  facet_wrap(~SPEC, scales = "free")
+
+#generate predictions for an average size fish (or important for consumption) and compare how often our predicted values would make an advisory vs what the data do now
+pred_data <- hg.data %>% 
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+  distinct(easting, 
+         northing, 
+         SPEC, 
+         scaled_logit_wetlands, 
+         scaled_log_WS_Lake_Ratio, 
+         scaled_log_area,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         zm_sample) %>% 
+  mutate(scaled_length = 0)
+
+predictions <- pred_data %>% 
+  add_predicted_draws(fit.gp, ndraws = 100) 
+
+predictions_summary <- predictions %>% 
+  median_qi()
+
+sample_from_data <- hg.data %>%
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+  group_by(easting, northing, SPEC, zm_sample) %>% 
+  summarise(mean_lake_spec_sample = mean(log_hg) >= log(0.22))
+
+sample_from_preditions <- predictions_summary %>% 
+  group_by(SPEC, easting, northing, zm_sample) %>% 
+  summarise(mean_lake_spec_pred = .prediction >= log(0.22))
+
+combined <- sample_from_data %>% 
+  left_join(sample_from_preditions)
+rm(sample_from_data, sample_from_preditions)
+
+lake_level_check <- combined %>% 
+  group_by(easting, northing, SPEC, zm_sample) %>% 
+  summarise(same_designation = case_when(mean_lake_spec_pred == mean_lake_spec_sample ~ T,
+                                         TRUE ~ F),
+            predicted_not_observed = case_when((mean_lake_spec_pred == TRUE & mean_lake_spec_sample == FALSE) ~ T,
+                                               T ~ F),
+            observed_not_predicted = case_when((mean_lake_spec_pred == F & mean_lake_spec_sample == T) ~ T,
+            T ~ F)
+            )  %>% 
+  group_by(SPEC) %>% 
+  summarise(total_same = sum(same_designation == T),
+            total_predicted_not_observed = sum(predicted_not_observed == T),
+            total_observed_not_predicted = sum(observed_not_predicted == T),
+            n = n()) %>% 
+  mutate(per_same = round(total_same/n *100, 3),
+         per_predicted_not_observed = round(total_predicted_not_observed/ n *100, 3),
+         per_observed_not_predicted = round(total_observed_not_predicted /n *100, 3))
+rm(lake_level_check)
 ```
 
 
