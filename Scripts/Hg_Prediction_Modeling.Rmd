@@ -1201,16 +1201,26 @@ hg.data <- hg.model %>%
 rm(hg, hg.model)
 
 #filtering out spec-lake combinations
-loo_spec_lakes <- hg.data %>% 
-  distinct(SPEC, DOW) %>% 
-  sample_frac(0.15)
+#loo_spec_lakes <- hg.data %>% 
+  #distinct(SPEC, DOW) %>% 
+  #sample_frac(0.15)
 
-hg.data.loo <- hg.data %>% 
-  anti_join(loo_spec_lakes, by = c("SPEC", "DOW"))
+#hg.data.loo <- hg.data %>% 
+  #anti_join(loo_spec_lakes, by = c("SPEC", "DOW"))
+hg.data.loo <- read_csv("statewide_hg_loo_spec_lake_data.csv")
+leave_out_samples <- read_csv("spec_lake_loo_data.csv") 
+
+loo_spec_lakes <- leave_out_samples %>% 
+  distinct(SPEC, parent_dow)
+
+hg.data.loo.check <- hg.data %>% 
+  anti_join(leave_out_samples)
+############i finally got a df that has the same diffence in # of obs but the DOWs would not be 100% consistence due to multi dows for the same lat/lon
+#find a way to regenerate the hg.data.loo from the loo samples 
+
 
 #summary of samples that were left out
-hg.data %>% 
-  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+leave_out_samples %>% 
   summarise(avg_hg = mean(HGPPM),
             wae = sum(SPEC == "WAE"),
             nop = sum(SPEC == "NOP"),
@@ -1248,6 +1258,7 @@ fit.gp <- brm(log_hg ~
                      cores = 12)
 #saveRDS(fit.gp, "statewide_hg_loo_spec_lake.rds")
 fit.gp <- readRDS("statewide_hg_loo_spec_lake.rds")
+
 
 #summary
 summary(fit.gp)
@@ -3099,6 +3110,7 @@ random_effects <- ranef(fit.wae)
 dow.spec <- as.data.frame(random_effects$`DOW:SPEC`)
 ```
 
+
 #HMSC
 ```{r}
 library(Hmsc)
@@ -3223,6 +3235,83 @@ rm(hg_zm, hg.model, lake_link, map, map_sf, mn_boundary, zm)
 
 #Old code
 ```{r}
+################steps i went through to get back loo data############################
+lakes <- hg.data %>% 
+  #generating xwalk back to original data from predicted data
+  mutate(easting.factor = as.character(round(easting, 8)),
+         northing.factor = as.character(round(northing, 8)),
+         parent_dow = substr(DOW, 1, 6)) %>%
+  #one lake has multi basins and a few connected lakes get the same UTM, fixing that to get correct join
+  mutate(parent_dow = case_when(parent_dow == "110415" ~ "040030",
+                         parent_dow == "860230" ~ "860229",
+                         TRUE ~ parent_dow)) %>% 
+  distinct(easting.factor, northing.factor, DOW, parent_dow)
+
+
+#step 1 - get original dow back to the lakes based on easting and northing 
+distinct_lakes <- lakes %>% 
+  distinct(easting.factor, northing.factor, .keep_all = T)
+#this cuts down to only one DOW and parent dow for each easting/northing
+
+hg.data.loo <- read_csv("statewide_hg_loo_spec_lake_data.csv") %>% 
+    mutate(easting.factor = as.character(round(easting, 8)),
+           northing.factor = as.character(round(northing, 8)))
+
+hg.data.loo.merge <- hg.data.loo %>% 
+  distinct(easting.factor, northing.factor) %>% 
+  right_join(distinct_lakes, by = c("easting.factor", "northing.factor")) 
+#now we have a dow and a parent for each lake-specs combo in cases where there are multipule dows within easting/northing the first one is taken
+
+#step 2 - fine places where there are multiple dows and/or parent dows with the same utms
+multi_dows <- lakes %>% 
+  group_by(easting.factor, northing.factor) %>% 
+  summarise(n_dows = n_distinct(DOW)) %>% 
+  filter(n_dows > 1) %>% 
+  left_join(lakes) %>% 
+  select(-n_dows)
+#there are 4 lakes that have the same utm coords but different dows 
+#we should inspect this carefully when creating the hg data difference 
+
+hg.data.loo.merge %>% 
+  filter(parent_dow %in% multi_dows$parent_dow)
+#looks like all cases of multi dows in same utms are present
+
+hg.data.loo <- hg.data.loo %>% 
+  left_join(hg.data.loo.merge)
+
+hg.data %>% 
+  distinct(SPEC, DOW)
+#3127 spec-dow combos in original data frame
+3127*.15
+#we would expect 469 spec-dow combos in difference df
+
+hg.data.loo.distict <- hg.data.loo %>% 
+  distinct(SPEC, DOW)
+
+hg.data %>% 
+  distinct(SPEC, DOW) %>% 
+  anti_join(hg.data.loo.distict)
+#we end up with 483 but this is probably DOWs that get lose due to same utms, lets try partent dow
+
+hg.data.loo %>% 
+  distinct(DOW)
+
+hg.data %>% 
+  distinct(DOW)
+
+hg.data.loo.distict <- hg.data.loo %>% 
+  distinct(DOW)
+
+hg.data %>% 
+  distinct(DOW) %>% 
+  anti_join(hg.data.loo.distict)
+
+diff.df <- hg.data %>% 
+  mutate(parent_dow = substr(DOW, 1, 6)) %>% 
+  anti_join(hg.data.loo, by = c("SPEC", "parent_dow"))
+write_csv(diff.df, "spec_lake_loo_data.csv")
+
+
 ################linking to lagos data############
 #load all lagos data
 lagos <- lagosne_load()

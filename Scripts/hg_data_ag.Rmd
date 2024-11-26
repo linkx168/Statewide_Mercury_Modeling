@@ -210,3 +210,142 @@ hg_data %>%
            state_id) %>% 
   print(n = nrow(.))
 ```
+
+#covreage
+```{r}
+library(tidyverse)
+mn_lakes_ag <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Aggregated Data", "mn_lakes_hg_covariates.csv"))
+
+mn_lakes_ag %>% 
+  summarise(na_mglp = sum(is.na(nws_nlcd_wetemerg95_pct)),
+            percent = (na_mglp/n()) * 100)
+
+mn_lakes_ag %>% 
+  distinct(state_id, nws_nlcd_wetemerg95_pct) %>% 
+  summarise(na_mglp = sum(is.na(nws_nlcd_wetemerg95_pct)),
+            percent = (na_mglp/n()) * 100)
+
+mn_lakes_ag %>% 
+  filter(is.na(nws_nlcd_wetemerg95_pct)) %>% 
+  distinct(waterbody) %>% 
+  arrange(waterbody) %>% 
+  print(n = nrow(.))
+```
+
+#wisconsin data ag
+```{r}
+library(janitor)
+
+#raw data
+wi_1 <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "WI", "WI raw data from agency", "Statewide Fish Hg 1990-1999 for MN.csv"))
+
+wi_2 <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "WI", "WI raw data from agency", "Statewide Fish Hg 2000-2009 for MN.csv"))
+
+wi_3 <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "WI", "WI raw data from agency", "Statewide Fish Hg 2010-2017 for MN.csv"))
+
+wi_4 <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "WI", "WI raw data from agency", "Statewide Fish Hg 2018-2023 for MN.csv"))
+
+#aggregating
+wi_hg <- bind_rows(wi_1, wi_2, wi_3, wi_4) %>% 
+  clean_names() %>% 
+  select(location_code:qualifier) %>% 
+  mutate(sample_date = mdy(sample_date))
+write_csv(wi_hg, "wi_hg_26NOV2024.csv")
+glimpse(wi_hg)
+
+#exploring the data
+wi_hg %>% 
+  group_by(location_type) %>% 
+  count()
+#almost 11K lake records
+
+wi_hg %>% 
+  filter(location_type == "LAKE") %>% 
+  group_by(sample_type) %>% 
+  count()
+
+wi_hg %>% 
+  filter(location_type == "LAKE") %>% 
+  summarise(min_year = min(year(sample_date)),
+            max_year = max(year(sample_date)))
+
+wi_hg %>% 
+  filter(location_type == "LAKE") %>% 
+  summarise(n_distinct(wbic))
+
+wi_hg %>% 
+  filter(location_type == "LAKE") %>% 
+  group_by(wbic, sample_type, year(sample_date)) %>% 
+  count() %>% 
+  group_by(sample_type) %>% 
+  summarise(avg_n_spec_lake = mean(n),
+            max = max(n),
+            min = min(n))
+
+wi_hg %>% 
+  filter(location_type == "LAKE") %>% 
+  group_by(wbic, sample_type) %>% 
+  summarise(n_years = n_distinct(year(sample_date))) %>% 
+  ggplot() +
+  geom_histogram(aes(n_years)) +
+  facet_wrap(~sample_type, scales = "free")
+
+#wi zm lakes 
+wi_zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "WI_ZM_lakes.csv")) %>% 
+  clean_names() %>% 
+  mutate(wbic_clean = str_pad(waterbody_id_code_wbic, width = 7, side = "left", pad = "0")) %>% 
+  select(species,
+         status,
+         wbic_clean,
+         year_first_found)
+glimpse(wi_zm)
+
+wi_hg %>% 
+  mutate(wbic_clean = str_replace(wbic, "_", "")) %>% 
+  select(wbic, wbic_clean) %>% 
+  distinct(wbic, wbic_clean) %>% 
+  print(n = nrow(.))
+
+wi_hg_zm <- wi_hg %>% 
+  filter(location_type == "LAKE") %>% 
+  mutate(wbic_clean = str_replace(wbic, "_", "")) %>%
+  left_join(wi_zm, by = "wbic_clean", relationship = "many-to-one") %>% 
+  mutate(zm_lake = case_when(!is.na(species) ~ "y",
+                             TRUE ~ "n"),
+         zm_sample = case_when(year_first_found >= year(sample_date) ~ "y",
+                               TRUE ~ "n"),
+         zm_sample_lag = case_when(year_first_found >= (year(sample_date) + 2) ~ "y",
+                               TRUE ~ "n"))
+wi_hg_zm %>% 
+  distinct(wbic, zm_lake) %>% 
+  summarise(zm_lakes = sum(zm_lake == "y"),
+            uninvaded = sum(zm_lake == "n"))
+
+wi_hg_zm %>% 
+  group_by(zm_lake) %>% 
+  count()
+
+wi_hg_zm %>% 
+  filter(zm_lake == "y") %>% 
+  group_by(wbic_clean) %>% 
+  count() %>% 
+  ungroup() %>% 
+  summarise(avg_invaded = mean(n))
+
+wi_hg_zm %>% 
+  filter(zm_lake == "y") %>% 
+  distinct(wbic_clean, zm_sample) %>% 
+  group_by(wbic_clean) %>% 
+  count() %>% 
+  filter(n >1)
+
+wi_hg_zm %>% 
+  filter(zm_lake == "y") %>% 
+  group_by(wbic_clean, zm_sample) %>% 
+  count() %>% 
+  group_by(zm_sample) %>% 
+  summarise(invaded_avg = mean(n),
+            max_n = max(n),
+            min_n = min(n))
+```
+
