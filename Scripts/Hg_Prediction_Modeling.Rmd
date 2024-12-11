@@ -41,7 +41,7 @@ library(emmeans)
 #Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -72,7 +72,7 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
@@ -100,7 +100,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -3505,5 +3505,174 @@ dow_effect_species <- fit.statewide %>%
                                          yep.hg < 0.2 ~ "n"))
 ```
 
+#Exploring prior for lscale
+```{r}
+library(stats)  # For numerical solvers like `uniroot`
 
+# Inverse Gamma CDF i takes the gamma distribution and gets the inverse
+inv_gamma_cdf <- function(x, a, b) {
+  pgamma(1 / x, shape = a, rate = 1 / b, lower.tail = TRUE)
+}
+
+#x is the value used to comput the cumulative distruiton funciton 
+#a is the shae of the inverse gamma
+#b is hte scale parameter of the inverse gamma
+
+# Function to compute deltas (residuals for quantile constraints)
+# this is making sure that the lower l is close to .01 and the upper is close to 0.99 such that the probability is above 0.01
+tail_delta <- function(params, theta) {
+  a <- exp(params[1])  # Shape parameter
+  b <- exp(params[2])  # Scale parameter
+  
+  l <- theta[1]  # Lower bound
+  u <- theta[2]  # Upper bound
+  
+  delta1 <- inv_gamma_cdf(l, a, b) - 0.01  # 1% below lower bound
+  delta2 <- 1 - inv_gamma_cdf(u, a, b) - 0.01  # 1% above upper bound
+  
+  return(c(delta1, delta2))
+}
+
+# Initialize parameters
+# the lower bound should be above 20 and the upper bound is 600 for the length scale 
+# This is a decision that the length scale should fall between these values - based on the distribution of distances from the data
+l <- 20
+u <- 600
+theta <- c(l, u)
+
+# Heuristic initial guesses for log(a) and log(b)
+delta <- 1 # represent the desired difference between quarantines - 1 generates initial guesses for the parameters a and b of the inverse gamma distribution based on the specified bounds of l and u
+a_guess <- log((delta * (u + l) / (u - l))^2 + 2)
+b_guess <- log(((u + l) / 2) * ((delta * (u + l) / (u - l))^2 + 1))
+
+# Use numerical solver to find log(a) and log(b)
+# numeric solver is used to solve for the parameters a and b that satisfy the tail quantile constrains
+# it attempts to find values of a and b such that the CDF at l is 0.01 and at u is 0.99 - implying that the inverse gamma prior for the p will concentrate between l and u
+solver <- nleqslv::nleqslv(
+  x = c(a_guess, b_guess),  # Initial guesses
+  fn = function(params) tail_delta(params, theta)
+)
+
+# Extract results
+a <- exp(solver$x[1])  # Shape parameter
+b <- exp(solver$x[2])  # Scale parameter
+
+cat("Solved parameters:\n")
+cat("a (shape) =", a, "\n")
+cat("b (scale) =", b, "\n")
+
+# Validate: Plot the density
+dinv_gamma <- function(x, a, b) {
+  ifelse(x > 0, (b^a / gamma(a)) * x^(-a - 1) * exp(-b / x), 0)
+}
+
+# Plot the prior density
+rho <- seq(0, 1000, length.out = 1000)  # Adjust range as needed
+prior_density <- dinv_gamma(rho, a, b)
+
+plot(rho, prior_density, type = "l", col = "blue", lwd = 2,
+     xlab = "Length Scale (rho)", ylab = "Prior Density",
+     main = "Inverse Gamma Prior for Length Scale")
+abline(v = c(l, u), col = "red", lty = 2)  # Add vertical lines for bounds
+
+#looking at default priors
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  filter(!is.na(clarity)) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_logit_urban = c(scale(logit_urban)),
+         scaled_logit_ag = c(scale(logit_ag)),
+         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3)) 
+rm(hg, hg.model)
+
+
+default_prior(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, scale = F),
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+
+inv_gamma_density <- function(x, shape, scale) {
+  ifelse(x > 0, (scale^shape) * exp(-scale / x) / (gamma(shape) * x^(shape + 1)), 0)
+}
+
+# Define the parameters for the default prior
+shape <- 1.494197
+scale <- 37.243237
+
+# Create a sequence of values for lscale
+x_values <- seq(0.01, 600, length.out = 1000) # Avoid 0 since lscale > 0
+
+# Compute the density
+y_values <- inv_gamma_density(x_values, shape, scale)
+
+# Create a data frame for plotting
+prior_data <- data.frame(lscale = x_values, density = y_values)
+
+# Plot the prior
+ggplot(prior_data, aes(x = lscale, y = density)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Default Prior for lscale",
+    x = "lscale (length scale)",
+    y = "Density"
+  ) +
+  geom_vline(xintercept = c(20, 600), color = "red")+
+  theme_minimal()
+
+#attempting to add prior to model
+#lscale_prior <- prior(inv_gamma(3, 664), class = "lscale", coef = "gpeastingnorthing")
+test <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, scale = F),
+            data = hg.data,
+            prior = prior(inv_gamma(3, 664), class = "lscale", coef = "gpeastingnorthing"), 
+                     iter = 100,
+                     warmup = 5,
+                     chains = 2,
+                     family = gaussian(),
+                     cores = 12)
+prior_summary(test)
+summary(test)
+```
 
