@@ -15,6 +15,8 @@ library(janitor)
 library(mnsentinellakes)
 library(sf)
 library(brms)
+library(emmeans)
+library(tidybayes)
 ```
 
 # Data
@@ -308,18 +310,119 @@ baci_data %>%
   group_by(zm_lake, zm_sample) %>% 
   count()
 ```
+Data included:
+1. species = walleye and northern pike
+2. years = 2000 - 2023
+3. zm lakes with at least one year pre and post invasion (invasion considered without year lag) *this is most likley the difference between denver's master's analysis in sample sizes*
+4. reference lakes included with at least one year before and after 2011 (pseudo invasion 2011 - mid point of years in the analysis )
 
-Looks like there is some difference in the number of samples from Denver's master's tables and the data produced here - it is not explained by just he additional years - explore the filtering and data generating process if we wanted to explore further.
-
-#Analysis 
+# Analysis 
 ```{r}
 fit_1 <- brm(log(hgppm) ~ scaled.length*spec + zm_lake*zm_sample*spec + (1|dow) + (1|yearcoll), 
              data = baci_data, 
              family = gaussian(), 
              iter = 10000)
+#saveRDS(fit_1, "baci_update.rds")
+fit_1 <- readRDS("baci_update.rds")
 summary(fit_1)
+conditional_effects(fit_1)
 
-######I have not run this model fit yet, but is an option
-fit_2 <- brm(log(hgppm) ~ scaled.length*spec + zm_lake*time_since_invasion*spec + (1|dow) + (1|yearcoll))
+#look at the did package to fit a model that includes time since invasion vs just a pre-post
+```
+
+# Post Analysis - fit 1
+```{r}
+marg_effect <- emmeans(fit_1, ~ zm_lake * zm_sample | spec, re_fromula = NA, epred = T)
+contrast(marge_effect)
+
+#marginal plot - concider adding epred = T and no random effects (not sure how the calls work with this function)
+marg_plot <- emmip(fit_1, zm_lake ~ zm_sample | spec, CIs = T)
+marg_plot +
+  scale_color_manual("Zebra Mussel Lake", labels = c("No", "Yes"), values = c("lightblue", "salmon"))
+
+#pulling out the difference between groups 
+marg_draws <- emmeans(fit_1, ~ zm_lake * zm_sample | spec, re_fromula = NA, epred = T) %>% 
+  contrast() %>% 
+  gather_emmeans_draws() %>% 
+  unite("contrast_spec", contrast, spec, sep = "_") %>% # Combine contrast and spec into one column
+  pivot_wider(
+    names_from = contrast_spec, # Use the combined column for new column names
+    values_from = .value        # Populate new columns with .value
+  ) %>% 
+  clean_names() %>% 
+  mutate(ref_diff_wae = n_y_effect_wae - n_n_effect_wae,
+         zm_diff_wae = y_y_effect_wae - y_n_effect_wae,
+         ref_diff_nop = n_y_effect_nop - n_n_effect_nop,
+         zm_diff_nop = y_y_effect_nop - y_n_effect_nop) %>% 
+  select(ref_diff_wae,
+         zm_diff_wae,
+         ref_diff_nop,
+         zm_diff_nop) %>% 
+  pivot_longer(
+    cols = c(ref_diff_wae, zm_diff_wae, ref_diff_nop, zm_diff_nop),
+    names_to = c("zm_lake", "spec"),
+    names_pattern = "(ref|zm)_diff_(.*)",
+    values_to = "diff"
+  )
+
+marg_draws %>% 
+  ggplot() +
+  geom_density(aes(x = diff, fill = zm_lake), alpha = .5) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  facet_wrap(~spec) +
+  scale_fill_manual("Zebra Mussle Invasion", labels = c("No", "Yes"), values = c("lightblue", "salmon")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+#diff of differences 
+diff_of_diff <- emmeans(fit_1, ~ zm_lake * zm_sample | spec, re_fromula = NA, epred = T) %>% 
+  contrast() %>% 
+  gather_emmeans_draws() %>% 
+  unite("contrast_spec", contrast, spec, sep = "_") %>% # Combine contrast and spec into one column
+  pivot_wider(
+    names_from = contrast_spec, # Use the combined column for new column names
+    values_from = .value        # Populate new columns with .value
+  ) %>% 
+  clean_names() %>% 
+  mutate(ref_diff_wae = n_y_effect_wae - n_n_effect_wae,
+         zm_diff_wae = y_y_effect_wae - y_n_effect_wae,
+         ref_diff_nop = n_y_effect_nop - n_n_effect_nop,
+         zm_diff_nop = y_y_effect_nop - y_n_effect_nop) %>% 
+  select(ref_diff_wae,
+         zm_diff_wae,
+         ref_diff_nop,
+         zm_diff_nop) %>%  
+  mutate(diff_of_diff_wae = zm_diff_wae - ref_diff_wae,
+         diff_of_diff_nop = zm_diff_nop - ref_diff_nop) %>% 
+   pivot_longer(
+    cols = starts_with("diff_of_diff"), # Select columns with 'diff_of_diff'
+    names_to = "species",               # New column for the species names
+    names_prefix = "diff_of_diff_",     # Remove this prefix from the names
+    values_to = "value"                 # New column for the values
+  ) %>% 
+  select(species,
+         value)
+
+diff_of_diff_sum <- diff_of_diff %>% 
+  group_by(species) %>% 
+  summarise(median_diff = median(value),
+             lower_66 = quantile(value, probs = 0.17), # Lower bound of 66% credible interval
+    upper_66 = quantile(value, probs = 0.83), # Upper bound of 66% credible interval
+    lower_95 = quantile(value, probs = 0.025), # Lower bound of 95% credible interval
+    upper_95 = quantile(value, probs = 0.975)  # Upper bound of 95% credible interval
+            )
+
+diff_of_diff %>% 
+  ggplot() +
+  geom_density(aes(x = value)) + 
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_wrap(~species)
+
+#linewidth does not work in making the 66th visable - work on that 
+diff_of_diff_sum %>% 
+  ggplot() +
+  geom_pointinterval(aes(x = species, y = median_diff, ymin = lower_95, ymax = upper_95), linewidth = .5) +
+  geom_pointinterval(aes(x = species, y = median_diff, ymin = lower_66, ymax = upper_66), linewidth = 1.2) +
+  geom_hline(yintercept = 0, linetype = "dashed")
 ```
 
