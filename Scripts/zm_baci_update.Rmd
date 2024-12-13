@@ -7,6 +7,12 @@ editor_options:
   chunk_output_type: console
 ---
 
+# Things to do:
+1. Make pseudo invasion year based on lake characteristic, rather than midpoint
+2. create a loop that makes pre/post data for each species 
+3. run separate models for each species 
+4. Make difference calculations in back transformed scale instead of log scale
+
 # Library
 ```{r}
 library(tidyverse)
@@ -338,7 +344,16 @@ contrast(marge_effect)
 #marginal plot - concider adding epred = T and no random effects (not sure how the calls work with this function)
 marg_plot <- emmip(fit_1, zm_lake ~ zm_sample | spec, CIs = T)
 marg_plot +
-  scale_color_manual("Zebra Mussel Lake", labels = c("No", "Yes"), values = c("lightblue", "salmon"))
+  scale_color_manual("Zebra Mussel Lake", labels = c("No", "Yes"), values = c("lightblue", "salmon")) +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+#pulling out pre and post within each invasion grouping from each species 
+marg_draws_prepost <- emmeans(fit_1, ~ zm_lake * zm_sample | spec, re_fromula = NA, epred = T) %>% 
+  contrast() %>% 
+  gather_emmeans_draws()
+
+
 
 #pulling out the difference between groups 
 marg_draws <- emmeans(fit_1, ~ zm_lake * zm_sample | spec, re_fromula = NA, epred = T) %>% 
@@ -374,7 +389,21 @@ marg_draws %>%
   theme_minimal() +
   theme(legend.position = "bottom")
 
-#diff of differences 
+marg_draws %>% 
+  ggplot() + 
+  stat_pointinterval(aes(x = zm_lake, y = diff, color = zm_lake), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual("Lake Type", labels = c("Reference", "Zebra Mussel"), values = c("lightblue", "salmon")) +
+  facet_wrap(~spec) +
+  theme_minimal() +
+  xlab("") +
+  theme(legend.position = "none")
+ggsave("baci_difference.jpg", height = 5, width = 5, dpi = 600, bg = "white")
+  
+
+
+
+#diff of differences (difference between zm lakes and reference lakes)
 diff_of_diff <- emmeans(fit_1, ~ zm_lake * zm_sample | spec, re_fromula = NA, epred = T) %>% 
   contrast() %>% 
   gather_emmeans_draws() %>% 
@@ -423,6 +452,8 @@ diff_of_diff_sum %>%
   ggplot() +
   geom_pointinterval(aes(x = species, y = median_diff, ymin = lower_95, ymax = upper_95), linewidth = .5) +
   geom_pointinterval(aes(x = species, y = median_diff, ymin = lower_66, ymax = upper_66), linewidth = 1.2) +
-  geom_hline(yintercept = 0, linetype = "dashed")
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_minimal()
+ggsave("zm_lake_minus_ref_lake.jpg", height = 5, width = 5, dpi = 600, bg = "white")
 ```
 
