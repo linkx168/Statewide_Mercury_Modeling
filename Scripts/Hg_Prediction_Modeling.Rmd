@@ -253,10 +253,52 @@ saveRDS(fit.gp, "statewide_gp_lscale_prior.rds")
 fit.gp <- readRDS("statewide_gp_lscale_prior.rds")
 
 summary(fit.gp)
+plot(fit.gp)
+
+#inspect the prior
 prior_summary(fit.gp)
 
-library(extraDistr)
-rinvgamma(1000, shape = 3, scale = 664)
+get_variables(fit.gp)
+
+post_lscale <- fit.gp %>% 
+  spread_draws(lscale_gpeastingnorthing)
+
+# Define the parameters for the prior
+inv_gamma_density <- function(x, shape, scale) {
+  ifelse(x > 0, (scale^shape) * exp(-scale / x) / (gamma(shape) * x^(shape + 1)), 0)
+}
+
+shape <- 3
+scale <- 664
+
+# Create a sequence of values for lscale
+x_values <- seq(0.01, 600, length.out = 1000) # Avoid 0 since lscale > 0
+
+# Compute the density
+y_values <- inv_gamma_density(x_values, shape, scale)
+
+# Create a data frame for plotting
+prior_data <- data.frame(lscale = x_values, density = y_values)
+
+# Plot the prior
+ggplot(prior_data, aes(x = lscale, y = density)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Default Prior for lscale",
+    x = "lscale (length scale)",
+    y = "Density"
+  ) +
+  geom_vline(xintercept = c(20, 600), color = "red")+
+  theme_minimal()
+
+#compare the plot
+post_lscale %>% 
+  ggplot() +
+  geom_density(aes(lscale_gpeastingnorthing, fill = "orange"), alpha = .5)
+
+prior_data %>% 
+  ggplot() +
+  geom_line(data = prior_data, aes(x = lscale, y = density, fill = "blue"), alpha = .5)
 ```
 
 
