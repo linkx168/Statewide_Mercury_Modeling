@@ -197,6 +197,111 @@ hg.model <- hg %>%
          time_since_invasion = YEARCOLL - zm_lag_year_infested)
 ```
 
+#Model with a prior for lscale
+```{r}
+####################filtering hg data for predictive modeling##################
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  filter(!is.na(clarity)) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_logit_urban = c(scale(logit_urban)),
+         scaled_logit_ag = c(scale(logit_ag)),
+         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3)) 
+rm(hg, hg.model)
+
+fit.gp <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, gr = T,  scale = F),
+              prior = prior(inv_gamma(3, 664), class = "lscale", coef = "gpeastingnorthing"),
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+
+saveRDS(fit.gp, "statewide_gp_lscale_prior.rds")
+fit.gp <- readRDS("statewide_gp_lscale_prior.rds")
+
+summary(fit.gp)
+plot(fit.gp)
+
+#inspect the prior
+prior_summary(fit.gp)
+
+get_variables(fit.gp)
+
+post_lscale <- fit.gp %>% 
+  spread_draws(lscale_gpeastingnorthing)
+
+# Define the parameters for the prior
+inv_gamma_density <- function(x, shape, scale) {
+  ifelse(x > 0, (scale^shape) * exp(-scale / x) / (gamma(shape) * x^(shape + 1)), 0)
+}
+
+shape <- 3
+scale <- 664
+
+# Create a sequence of values for lscale
+x_values <- seq(0.01, 600, length.out = 1000) # Avoid 0 since lscale > 0
+
+# Compute the density
+y_values <- inv_gamma_density(x_values, shape, scale)
+
+# Create a data frame for plotting
+prior_data <- data.frame(lscale = x_values, density = y_values)
+
+# Plot the prior
+ggplot(prior_data, aes(x = lscale, y = density)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Default Prior for lscale",
+    x = "lscale (length scale)",
+    y = "Density"
+  ) +
+  geom_vline(xintercept = c(20, 600), color = "red")+
+  theme_minimal()
+
+#compare the plot
+post_lscale %>% 
+  ggplot() +
+  geom_density(aes(lscale_gpeastingnorthing, fill = "orange"), alpha = .5)
+
+prior_data %>% 
+  ggplot() +
+  geom_line(data = prior_data, aes(x = lscale, y = density, fill = "blue"), alpha = .5)
+```
+
+
 #GP with all lakes
 The general structure of this chunk
 1. filter MN state hg data reverent to prediction modeling
@@ -1201,26 +1306,16 @@ hg.data <- hg.model %>%
 rm(hg, hg.model)
 
 #filtering out spec-lake combinations
-#loo_spec_lakes <- hg.data %>% 
-  #distinct(SPEC, DOW) %>% 
-  #sample_frac(0.15)
+loo_spec_lakes <- hg.data %>% 
+  distinct(SPEC, DOW) %>% 
+  sample_frac(0.15)
 
-#hg.data.loo <- hg.data %>% 
-  #anti_join(loo_spec_lakes, by = c("SPEC", "DOW"))
-hg.data.loo <- read_csv("statewide_hg_loo_spec_lake_data.csv")
-leave_out_samples <- read_csv("spec_lake_loo_data.csv") 
-
-loo_spec_lakes <- leave_out_samples %>% 
-  distinct(SPEC, parent_dow)
-
-hg.data.loo.check <- hg.data %>% 
-  anti_join(leave_out_samples)
-############i finally got a df that has the same diffence in # of obs but the DOWs would not be 100% consistence due to multi dows for the same lat/lon
-#find a way to regenerate the hg.data.loo from the loo samples 
-
+hg.data.loo <- hg.data %>% 
+  anti_join(loo_spec_lakes, by = c("SPEC", "DOW"))
 
 #summary of samples that were left out
-leave_out_samples %>% 
+hg.data %>% 
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
   summarise(avg_hg = mean(HGPPM),
             wae = sum(SPEC == "WAE"),
             nop = sum(SPEC == "NOP"),
@@ -1259,6 +1354,9 @@ fit.gp <- brm(log_hg ~
 #saveRDS(fit.gp, "statewide_hg_loo_spec_lake.rds")
 fit.gp <- readRDS("statewide_hg_loo_spec_lake.rds")
 
+#data used in model
+loo_lake_spec <- fit.gp$data
+#write_csv(loo_lake_spec, "statewide_hg_loo_spec_lake_data.csv")
 
 #summary
 summary(fit.gp)
@@ -3110,7 +3208,6 @@ random_effects <- ranef(fit.wae)
 dow.spec <- as.data.frame(random_effects$`DOW:SPEC`)
 ```
 
-
 #HMSC
 ```{r}
 library(Hmsc)
@@ -3235,82 +3332,35 @@ rm(hg_zm, hg.model, lake_link, map, map_sf, mn_boundary, zm)
 
 #Old code
 ```{r}
-################steps i went through to get back loo data############################
+#finding distances between lakes
+library(stats)
 lakes <- hg.data %>% 
-  #generating xwalk back to original data from predicted data
-  mutate(easting.factor = as.character(round(easting, 8)),
-         northing.factor = as.character(round(northing, 8)),
-         parent_dow = substr(DOW, 1, 6)) %>%
-  #one lake has multi basins and a few connected lakes get the same UTM, fixing that to get correct join
-  mutate(parent_dow = case_when(parent_dow == "110415" ~ "040030",
-                         parent_dow == "860230" ~ "860229",
-                         TRUE ~ parent_dow)) %>% 
-  distinct(easting.factor, northing.factor, DOW, parent_dow)
+  distinct(DOW, easting, northing)
 
+dist_matrix <- dist(lakes[, c("easting", "northing")])
+dist_tibble <- as.matrix(dist_matrix) %>% 
+  as_tibble(rownames = "DOW") %>% 
+  pivot_longer(-DOW, names_to = "DOW_2", values_to = "distance") %>% 
+  filter(DOW  != DOW_2) %>% 
+  mutate(unique_pair = pmap_chr(list(DOW, DOW_2), ~ paste(sort(c(..1, ..2)), collapse = "-"))) %>% 
+  distinct(unique_pair, .keep_all = T)
 
-#step 1 - get original dow back to the lakes based on easting and northing 
-distinct_lakes <- lakes %>% 
-  distinct(easting.factor, northing.factor, .keep_all = T)
-#this cuts down to only one DOW and parent dow for each easting/northing
+dist_tibble %>% 
+  ggplot() +
+  geom_histogram(aes(distance), fill = "gray", color = "black", binwidth = 10) +
+  theme_minimal()
 
-hg.data.loo <- read_csv("statewide_hg_loo_spec_lake_data.csv") %>% 
-    mutate(easting.factor = as.character(round(easting, 8)),
-           northing.factor = as.character(round(northing, 8)))
+dist_tibble %>% 
+  ggplot() +
+  geom_density(aes(distance), fill = "gray", color = "black", binwidth = 10) +
+  theme_minimal()
 
-hg.data.loo.merge <- hg.data.loo %>% 
-  distinct(easting.factor, northing.factor) %>% 
-  right_join(distinct_lakes, by = c("easting.factor", "northing.factor")) 
-#now we have a dow and a parent for each lake-specs combo in cases where there are multipule dows within easting/northing the first one is taken
-
-#step 2 - fine places where there are multiple dows and/or parent dows with the same utms
-multi_dows <- lakes %>% 
-  group_by(easting.factor, northing.factor) %>% 
-  summarise(n_dows = n_distinct(DOW)) %>% 
-  filter(n_dows > 1) %>% 
-  left_join(lakes) %>% 
-  select(-n_dows)
-#there are 4 lakes that have the same utm coords but different dows 
-#we should inspect this carefully when creating the hg data difference 
-
-hg.data.loo.merge %>% 
-  filter(parent_dow %in% multi_dows$parent_dow)
-#looks like all cases of multi dows in same utms are present
-
-hg.data.loo <- hg.data.loo %>% 
-  left_join(hg.data.loo.merge)
-
-hg.data %>% 
-  distinct(SPEC, DOW)
-#3127 spec-dow combos in original data frame
-3127*.15
-#we would expect 469 spec-dow combos in difference df
-
-hg.data.loo.distict <- hg.data.loo %>% 
-  distinct(SPEC, DOW)
-
-hg.data %>% 
-  distinct(SPEC, DOW) %>% 
-  anti_join(hg.data.loo.distict)
-#we end up with 483 but this is probably DOWs that get lose due to same utms, lets try partent dow
-
-hg.data.loo %>% 
-  distinct(DOW)
-
-hg.data %>% 
-  distinct(DOW)
-
-hg.data.loo.distict <- hg.data.loo %>% 
-  distinct(DOW)
-
-hg.data %>% 
-  distinct(DOW) %>% 
-  anti_join(hg.data.loo.distict)
-
-diff.df <- hg.data %>% 
-  mutate(parent_dow = substr(DOW, 1, 6)) %>% 
-  anti_join(hg.data.loo, by = c("SPEC", "parent_dow"))
-write_csv(diff.df, "spec_lake_loo_data.csv")
-
+dist_tibble %>% 
+  summarise(min_dist = min(distance),
+            mean_dist = mean(distance),
+            median_dist = median(distance),
+            max_dist = max(distance),
+            per_under_2 = (sum(distance <= 2)/n()) * 100)
 
 ################linking to lagos data############
 #load all lagos data
@@ -3505,6 +3555,8 @@ dow_effect_species <- fit.statewide %>%
                                          yep.hg < 0.2 ~ "n"))
 ```
 
+<<<<<<< HEAD
+=======
 #Exploring prior for lscale
 ```{r}
 library(stats)  # For numerical solvers like `uniroot`
@@ -3676,3 +3728,4 @@ prior_summary(test)
 summary(test)
 ```
 
+>>>>>>> 2138cf94bf5e5406c9c0c0a78af3a2f68c6b10fe
