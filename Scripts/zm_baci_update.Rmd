@@ -164,6 +164,9 @@ hg.model <- hg %>%
          northing) %>% 
   mutate(zm_infested_lag_1 = Year_Infested +1,
          zm_infested_lag_2 = Year_Infested +2,
+         zm_infested_lag_3 = Year_Infested +3,
+         zm_infested_lag_4 = Year_Infested +4,
+         zm_infested_lag_5 = Year_Infested +5,
          zm_lake = case_when(is.na(Year_Infested) ~ "n",
                              TRUE ~ "y"),
          zm_sample = case_when(Year_Infested <=YEARCOLL ~ "y",
@@ -172,14 +175,16 @@ hg.model <- hg %>%
                                TRUE ~ "n"),
          zm_sample_lag_2 = case_when(zm_infested_lag_2 <= YEARCOLL ~ "y",
                                TRUE ~ "n"),
+         zm_sample_lag_3 = case_when(zm_infested_lag_3 <= YEARCOLL ~ "y",
+                               TRUE ~ "n"),
+         zm_sample_lag_4 = case_when(zm_infested_lag_4 <= YEARCOLL ~ "y",
+                               TRUE ~ "n"),
+         zm_sample_lag_5 = case_when(zm_infested_lag_5 <= YEARCOLL ~ "y",
+                               TRUE ~ "n"),
          time_since_invasion = YEARCOLL - Year_Infested) %>% 
   clean_names()
 
 rm(hg)
-
-hg.model %>% 
-  filter(waterway == "WHITE BEAR") %>% 
-  distinct(spec, yearcoll, zm_infested_lag_1, zm_infested_lag_2, zm_lake, zm_sample, zm_sam)
 ```
 
 # Data Coverage
@@ -324,9 +329,7 @@ This code builds a function that filters for:
 1. species of interest
 2. years after 2000
 3. zm lakes with at least one year pre and post invasion (invasion considered without year lag) 
-     *this is most likley the difference between denver's master's analysis in sample sizes*
 4. reference lakes included with at least one year before and after 2011 (pseudo invasion 2011 - mid point of years in the analysis)
-    *should be adapted in the future for more robust pseudo invasion year*
 ```{r}
 create_species_data <- function(species, data) {
   # Filter zebra mussel lakes
@@ -394,6 +397,35 @@ species_data %>%
             n_years = n_distinct(yearcoll),
             n_samples = n())
 
+species_data %>% 
+  group_by(spec, zm_lake) %>%
+  summarise(n_years = n_distinct(yearcoll))
+#looks like each level of zm_lake has all 23 years represented but they are not all repped at the sample level
+
+species_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_1) %>% 
+  summarise(mean = mean(lgthin),
+            sd = sd(lgthin),
+            min = min(lgthin),
+            max = max(lgthin),
+            n = n())
+
+species_data %>% 
+  group_by(spec, zm_lake) %>% 
+  summarise(mean = mean(lgthin),
+            sd = sd(lgthin),
+            min = min(lgthin),
+            max = max(lgthin),
+            n = n())
+
+species_data %>% 
+  group_by(spec) %>% 
+  summarise(mean = mean(lgthin),
+            sd = sd(lgthin),
+            min = min(lgthin),
+            max = max(lgthin),
+            n = n())
+
 rm(species_data)
 ```
 
@@ -417,7 +449,7 @@ mn_map <- states(cb = T) %>%
 minnesota_sf <- st_as_sf(mn_map)
 rm(mn_map)
 
-#summerize some data
+#summarize some data
 lake_summary <- map_data %>%
   group_by(dow, spec) %>%
   summarize(
@@ -432,19 +464,43 @@ spec <- map_data %>%
               values_from = spec,
               values_fn = length,
               values_fill = list(spec = NA)) %>% 
-  mutate(species = case_when(NOP == "1" & WAE == "1" ~ "Both",
+  mutate(species = case_when(NOP == "1" & WAE == "1" ~ "Walleye & Northern Pike",
                           NOP == "1" & is.na(WAE) ~ "Northern Pike",
                           TRUE ~ "Walleye"))
 
 lakes_sf <- lakes_sf %>%
   left_join(lake_summary, by = c("dow", "spec")) %>% 
   left_join(spec) %>% 
-  mutate(species = case_when(species == "Both" & spec == "WAE" ~ "Both - Walleye",
-                             species == "Both" & spec == "NOP" ~ "Both - Northern Pike",
+  mutate(species_simp = species) %>% 
+  mutate(species = case_when(species == "Walleye & Northern Pike" & spec == "WAE" ~ "Both - Walleye",
+                             species == "Walleye & Northern Pike" & spec == "NOP" ~ "Both - Northern Pike",
                              species == "Northern Pike" ~ "Northern Pike",
                              species == "Walleye" ~ "Walleye"))
 
-#make map
+#simple map showing lake locations by species 
+ggplot() +
+  # Plot Minnesota state
+  geom_sf(data = minnesota_sf, fill = "white", color = "black") +
+  
+  # Plot lakes with centroids
+  geom_sf(data = lakes_sf, 
+          aes(color = zm_lake, 
+              shape = species_simp),
+          size = 3) +
+  scale_color_manual("Invasion Status of Lake", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+  scale_shape_manual("Species Sampled", values = c(1, 16, 17)) +
+  # Remove gridlines and set white background
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid = element_blank(),
+        legend.position = c(.79, .4),
+         legend.box.background = element_rect(color = "black", size = 0.5),
+        legend.key.size = unit(.2, "cm")) 
+ggsave("BACI_lakes_map.jpg", height = 7, width = 7, dpi = 600, bg = "white")
+
+
+
+#make map - this make attempts to add sample size info - think it would be too much for a publication
 ggplot() +
   # Plot Minnesota state
   geom_sf(data = minnesota_sf, fill = "white", color = "black") +
@@ -472,7 +528,7 @@ ggplot() +
   
   # Add title and labels
   labs(shape = "Species")
-ggsave("BACI_lakes_map.jpg", height = 7, width = 5, dpi = 600, bg = "white")
+ggsave("BACI_lakes_map_complex.jpg", height = 5, width = 5, dpi = 600, bg = "white")
   
   
 rm(lake_summary, lake_sf, map_data, minnesota_sf, spec)
@@ -480,7 +536,7 @@ rm(lake_summary, lake_sf, map_data, minnesota_sf, spec)
 
 
 # Analysis 
-Be sure to change the zm_sample varible to the specified level of lag set in the filtering scirpt, change to the desired lag
+Be sure to change the zm_sample variable to the specified level of lag set in the filtering script, change to the desired lag
 ```{r}
 #walleye model fit
 fit_wae <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_1 + (1|dow) + (1|yearcoll), 
@@ -512,18 +568,27 @@ summary(fit_nop)
 plot(fit_nop)
 pp_check(fit_nop, ndraws = 50)
 
-#this generates contrants in the log scale 
+#this generates contrasts in the log scale 
 contrasts <- contrast(emmeans(fit_nop, ~ zm_lake * zm_sample_lag_1, re_formula = NA, epred = TRUE), 
                       method = "revpairwise", by = "zm_lake")
 contrasts
 # this gets us the answer in the log scale; such that for each level within zm lake, zm_sample y is "X" units higher/lower than zm_sample n
 # If you were to exp() that estimate, then we can say that zm_sample y is "X" TIMES the concentration of zm sample n 
+
+contrasts <- contrast(emmeans(fit_nop, ~ zm_lake * zm_sample_lag_1, re_formula = NA, epred = TRUE, at = list(scaled_length = -1.599011)), 
+                      method = "revpairwise", by = "zm_lake")
+contrasts
 rm(contrasts)
 
 #now lets generate contrasts in the original scale
 marg_draws <- emmeans(fit_nop, ~ zm_lake * zm_sample_lag_1, re_fromula = NA, epred = T) %>% 
   gather_emmeans_draws() %>% 
   mutate(hg_ppm = exp(.value))
+
+#code below creates marg draws for a 15 inch fish
+#marg_draws <- emmeans(fit_nop, ~ zm_lake * zm_sample_lag_1, re_fromula = NA, epred = T, at = list(scaled_length = -1.599011)) %>% 
+#  gather_emmeans_draws() %>% 
+#  mutate(hg_ppm = exp(.value))
 
 #average values for zm_lake for before and after 
 marg_draws %>% 
@@ -606,22 +671,6 @@ contrasts_draws %>%
   theme(legend.position = "none",
         panel.grid.major.x = element_blank()) 
 
-#diff minus diff
-contrasts_draws %>% 
-  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
-         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
-  select(.draw, diff_reference, diff_zm) %>% 
-  mutate(diff_of_diff = diff_zm - diff_reference) %>% 
-  select(.draw, diff_of_diff) %>% 
-  ggplot() +
-  stat_pointinterval(aes(y = diff_of_diff), .width = c(.66, .95)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  ylab("Difference of Difference (ppm)") +
-  xlab("") +
-  theme_minimal() +
-  theme(panel.grid.major.x = element_blank(),
-        axis.text.x = element_blank())
-
 ####################combining plot for viewing#################################
 median_lines <- marg_draws %>%
   mutate(zm_sample_lag_1 = case_when(zm_sample_lag_1 == "n" ~ "Before",
@@ -691,6 +740,66 @@ pike_outline <- draw_image("pike_outline.jpg", scale = 0.1, x = -0.35, y = 0.4)
 combined_plot_pike <- ggdraw(combined_plot) +
   pike_outline
 combined_plot_pike
+
+
+#probability that invaded is larger than invaded 
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  median_qi(.width = c(.66, .95))
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  pivot_longer(cols = c(diff_reference, diff_zm),
+               names_to = "zm_lake",
+               values_to = "diff") %>% 
+  mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                             TRUE ~ "Uninvaded")) %>%
+  ggplot() + 
+  geom_density(aes(diff, fill = zm_lake))
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  mutate(diff_of_diff = diff_zm - diff_reference) %>% 
+  select(.draw, diff_of_diff) %>% 
+  ggplot() +
+  geom_density(aes(diff_of_diff)) +
+  geom_vline(xintercept = 0, linetype = "dashed")
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  mutate(diff_of_diff = diff_zm - diff_reference) %>% 
+  select(.draw, diff_of_diff) %>% 
+  summarise(n_larger = sum(diff_of_diff > 0),
+            n_total = n(),
+            prob = n_larger/n_total,
+            median = median(diff_of_diff),
+            mean = mean(diff_of_diff),
+            ci_95_lower = quantile(diff_of_diff, probs = c(0.025)),
+            ci_95_upper = quantile(diff_of_diff, probs = c(0.975)))
+
+#diff minus diff
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  mutate(diff_of_diff = diff_zm - diff_reference) %>% 
+  select(.draw, diff_of_diff) %>% 
+  ggplot() +
+  stat_pointinterval(aes(y = diff_of_diff), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference of Difference (ppm)") +
+  xlab("") +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank(),
+        axis.text.x = element_blank())
 
 #clear objects 
 rm(combined_plot, contrasts_draws, fit_nop, marg_draws, median_lines, pike_outline, plot1, plot2)
@@ -880,6 +989,49 @@ combined_plot_walleye <- ggdraw(combined_plot) +
   walleye_outline
 combined_plot_walleye
 
+#probability that invaded is larger than invaded 
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  median_qi(.width = c(.66, .95))
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  pivot_longer(cols = c(diff_reference, diff_zm),
+               names_to = "zm_lake",
+               values_to = "diff") %>% 
+  mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                             TRUE ~ "Uninvaded")) %>%
+  ggplot() + 
+  geom_density(aes(diff, fill = zm_lake))
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  mutate(diff_of_diff = diff_zm - diff_reference) %>% 
+  select(.draw, diff_of_diff) %>% 
+  ggplot() +
+  geom_density(aes(diff_of_diff)) +
+  geom_vline(xintercept = 0, linetype = "dashed")
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  mutate(diff_of_diff = diff_zm - diff_reference) %>% 
+  select(.draw, diff_of_diff) %>% 
+  summarise(n_larger = sum(diff_of_diff > 0),
+            n_total = n(),
+            prob = n_larger/n_total,
+            median = median(diff_of_diff),
+            mean = mean(diff_of_diff),
+            ci_95_lower_diff = quantile(diff_of_diff, probs = c(0.025)),
+            ci_95_upper_diff = quantile(diff_of_diff, probs = c(0.975)))
+
 #clear objects 
 rm(combined_plot, contrasts_draws, fit_wae, marg_draws, median_lines, walleye_outline, plot1, plot2)
 ```
@@ -892,6 +1044,228 @@ species_plot
 
 ggsave(plot = species_plot, "baci_wae_nop_marginal_effects.jpg", height = 5, width = 7, dpi = 600, bg = "white")
 ```
+
+# Exploring Random Effects - dow
+```{r}
+#walleye - this is code to take the top 5, bottom 5, and mille lacs
+ranef_dow <- fit_wae %>% 
+  spread_draws(r_dow[dow, Intercept]) %>% 
+  group_by(dow) %>% 
+  summarise(median = median(r_dow)) %>% 
+  mutate(dow = sprintf("%08d", as.numeric(dow)))
+
+lake_names <- wae_data %>% 
+  distinct(dow, .keep_all = T) %>% 
+  select(dow, waterway)
+
+ranef_dow_names <- ranef_dow %>% 
+  left_join(lake_names) %>% 
+  arrange(desc(median))
+
+mille_lacs <- ranef_dow_names %>% 
+  filter(dow == "48000200")
+
+top_bottom_dow <- bind_rows(
+  head(ranef_dow_names, 5),
+  tail(ranef_dow_names, 5),
+  mille_lacs
+)
+
+#plotting 
+ranef_dow_names %>% 
+  ggplot() +
+  geom_density(aes(median)) 
+
+ranef_dow_names %>% 
+  ggplot() +
+  geom_histogram(aes(median), fill = "grey") +  # Density plot
+  geom_point(
+    data = mille_lacs, 
+    aes(x = median, y = 0),  # Place the point on the x-axis
+    color = "red", 
+    size = 3
+  ) +
+  labs( y = "",
+        x = ""
+  ) +
+  theme_minimal()
+ggsave("walleye_random_effect_dow.jpg", height = 5, width = 5, dpi = 600, background = "white")
+
+rm(ranef_dow, lake_names, ranef_dow_names, mille_lacs, top_bottom_dow)
+```
+
+# Exploring random effects - year
+```{r}
+walleye_outline <- draw_image("walleye_outline.jpg", scale = 0.1, x = -0.35, y = 0.4)
+pike_outline <- draw_image("pike_outline.jpg", scale = 0.1, x = -0.35, y = 0.4)
+
+#walleye
+ranef_year_wae_raw <- fit_wae %>% 
+  spread_draws(r_yearcoll[yearcoll, Intercept])
+
+ranef_year_wae <- ranef_year_wae_raw %>% 
+  ggplot(aes(x = yearcoll, y = r_yearcoll)) +
+  stat_pointinterval(
+    .width = c(.66, .95),
+    position = position_dodge(width = 0.1)
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_y_continuous(limits = c(-.3, .3)) +
+  labs(x = "") +
+  theme_minimal()
+
+ranef_year_wae <- ggdraw(ranef_year_wae) + walleye_outline
+ranef_year_wae
+
+#pike
+ranef_year_nop_raw <- fit_nop %>% 
+  spread_draws(r_yearcoll[yearcoll, Intercept])
+
+ranef_year_nop <- ranef_year_nop_raw %>% 
+  ggplot(aes(x = yearcoll, y = r_yearcoll)) +
+  stat_pointinterval(
+    .width = c(.66, .95),
+    position = position_dodge(width = 0.1)
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_y_continuous(limits =  c(-.3, .3)) +
+  labs(x = "") +
+  theme_minimal()
+
+ranef_year_nop <- ggdraw(ranef_year_nop) + pike_outline
+ranef_year_nop
+
+#combining plots
+combined_rand_eff_year <- ranef_year_nop / ranef_year_wae
+combined_rand_eff_year
+ggsave("rand_year_effect.jpg", combined_rand_eff_year, height = 5, width = 7, dpi = 600, background = "white")
+
+rm(ranef_year_wae_raw, ranef_year_nop_raw, ranef_year_wae, ranef_year_nop, walleye_outline, pike_outline, combined_rand_eff_year)
+```
+
+#sensitivity analysis of lag year 
+this is currently built from 
+```{r}
+#creating function that is flexible to the lag variable used
+
+create_species_data <- function(species, data, lag_variable) {
+  # Filter zebra mussel lakes using the specified lag variable
+  zm_lakes <- data %>% 
+    filter(spec == species) %>% 
+    filter(yearcoll >= 2000) %>% 
+    filter(zm_lake == "y") %>% 
+    distinct(dow, !!sym(lag_variable)) %>% 
+    group_by(dow) %>% 
+    count() %>% 
+    filter(n > 1)
+
+  zm_fish <- data %>% 
+    filter(yearcoll >= 2000) %>%
+    filter(spec == species) %>% 
+    filter(dow %in% c(zm_lakes$dow))
+
+  # Filter reference lakes (unchanged strategy)
+  ref_lakes <- data %>% 
+    filter(spec == species) %>% 
+    filter(yearcoll >= 2000) %>% 
+    filter(zm_lake == "n") %>% 
+    mutate(!!sym(lag_variable) := case_when(
+      yearcoll >= 2011 ~ "y",
+      yearcoll <= 2010 ~ "n"
+    )) %>% 
+    distinct(dow, !!sym(lag_variable)) %>% 
+    group_by(dow) %>% 
+    count() %>% 
+    filter(n > 1)
+
+  ref_fish <- data %>% 
+    filter(yearcoll >= 2000) %>% 
+    filter(spec == species) %>% 
+    filter(dow %in% c(ref_lakes$dow)) %>% 
+    mutate(!!sym(lag_variable) := case_when(
+      yearcoll >= 2011 ~ "y",
+      yearcoll <= 2010 ~ "n"
+    ))
+
+  # Combine zebra mussel and reference data
+  species_data <- bind_rows(ref_fish, zm_fish)
+  
+  # Scale length
+  species_data <- species_data %>% 
+    mutate(scaled_length = c(scale(lgthin))) %>% 
+    select(waterway,
+           dow,
+           centroid_lat,
+           centroid_lon,
+           type,
+           yearcoll,
+           spec,
+           anathg,
+           lgthin,
+           hgppm,
+           zm_lake,
+           !!sym(lag_variable)
+           )
+
+  return(species_data)
+}
+
+# looping over the lag variable for each species 
+species <- c("WAE", "NOP")
+lag_variables <- c("zm_sample", paste0("zm_sample_lag_", 1:5))
+
+for (species in species) {
+  for (lag_var in lag_variables) {
+    # Create the data for the current combination
+    species_data <- create_species_data(species = species, data = hg.model, lag_variable = lag_var)
+    
+    # Dynamically assign the object name
+    object_name <- paste0(species, "_", lag_var)
+    assign(object_name, species_data)
+  }
+}
+
+
+
+# looping over a model for sensitivity analysis
+# Loop through species and lag variables to fit models
+for (species in species) {
+  for (lag_var in lag_variables) {
+    # Get the dataset name dynamically
+    data_name <- paste0(species, "_", lag_var)
+    current_data <- get(data_name) # Get the dataset object dynamically
+    
+    # Define the formula dynamically
+    model_formula <- as.formula(
+      paste0("log(hgppm) ~ scaled_length + zm_lake * ", lag_var, " + (1|dow) + (1|yearcoll)")
+    )
+    
+    # Fit the model
+    fit <- brm(
+      formula = model_formula,
+      data = current_data,
+      family = gaussian(),
+      iter = 8000,
+      warmup = 4000
+    )
+    
+    # Save the model
+    saveRDS(fit, paste0("baci_update_", tolower(species), "_", lag_var, ".rds"))
+  }
+}
+
+#clean environment
+# List all objects in the environment
+all_objects <- ls()
+
+# Specify the object(s) to keep
+objects_to_keep <- c("hg.model")
+
+# Remove all objects except those specified in `objects_to_keep`
+rm(list = setdiff(all_objects, objects_to_keep))
+rm(all_objects, objects_to_keep)
+```
+
 
 
 # Old code 
