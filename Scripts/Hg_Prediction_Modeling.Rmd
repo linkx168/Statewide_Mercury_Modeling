@@ -41,7 +41,7 @@ library(emmeans)
 #Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -72,7 +72,7 @@ hg <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
@@ -100,7 +100,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -197,7 +197,7 @@ hg.model <- hg %>%
          time_since_invasion = YEARCOLL - zm_lag_year_infested)
 ```
 
-#Models exploring spaical term
+#Models exploring spacial term
 ```{r}
 ####################filtering hg data for predictive modeling##################
 hg.data <- hg.model %>% 
@@ -250,7 +250,7 @@ fit.gp <- brm(log_hg ~
                      family = gaussian(),
                      cores = 12)
 
-saveRDS(fit.gp, "statewide_gp_lscale_prior.rds")
+#saveRDS(fit.gp, "statewide_gp_lscale_prior.rds")
 fit.gp <- readRDS("statewide_gp_lscale_prior.rds")
 
 summary(fit.gp)
@@ -258,7 +258,6 @@ plot(fit.gp)
 
 #inspect the prior
 prior_summary(fit.gp)
-
 get_variables(fit.gp)
 
 post_lscale <- fit.gp %>% 
@@ -301,29 +300,6 @@ prior_data %>%
   ggplot() +
   geom_line(data = prior_data, aes(x = lscale, y = density, fill = "blue"), alpha = .5)
 
-#############random effect for each species with lake##################
-fit.ran <- brm(log_hg ~ 
-                scaled_length*SPEC + 
-                SPEC + 
-                scaled_logit_wetlands + 
-                scaled_logit_urban +
-                scaled_logit_ag + 
-                scaled_log_WS_Lake_Ratio + 
-                scaled_log_area + 
-                zm_sample +
-                (1 | DOW),
-                     data = hg.data,
-                     iter = 10000,
-                     warmup = 500,
-                     chains = 3,
-                     family = gaussian(),
-                     cores = 12)
-#saveRDS(fit.ran, "statewide_hg_ran.rds")
-
-summary(fit.ran)
-plot(fit.ran)
-
-
 #########lscale with uniform, no less than 20 or larger than 100###############
 # Set the range for the uniform distribution
 min_val <- 20
@@ -363,11 +339,37 @@ fit.gp.uni <- brm(log_hg ~
                      chains = 3,
                      family = gaussian(),
                      cores = 12)
-saveRDS(fit.gp.uni, "statewide_hg_gp_uni.rds")
+#saveRDS(fit.gp.uni, "statewide_hg_gp_uni.rds")
+fit.gp <- readRDS("statewide_hg_gp_uni.rds")
 
-prior_summary(fit.gp.uni)
-summary(fit.gp.uni)
-plot(fit.gp.uni)
+prior_summary(fit.gp)
+summary(fit.gp)
+plot(fit.gp)
+
+
+
+##########fixing lscale???#################
+trial <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, gr = T,  scale = F),
+              prior = prior(constant(10), class = "lscale", coef = "gpeastingnorthing"),
+                     data = hg.data,
+                     iter = 4000,
+                     warmup = 200,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+
+prior_summary(trial)
+summary(trial)
+plot(trial)
 ```
 
 
@@ -436,6 +438,7 @@ fit.gp <- brm(log_hg ~
 fit.gp <- readRDS("statewide_gp.rds")
 
 ##################basic summaries###############################
+get_prior(fit.gp)
 plot(fit.gp)
 summary(fit.gp)
 plot(conditional_effects(fit.gp, ndraws = 100))
