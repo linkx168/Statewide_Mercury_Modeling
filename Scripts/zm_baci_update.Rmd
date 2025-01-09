@@ -141,6 +141,7 @@ hg.model <- hg %>%
          NOFISH,
          LGTHIN,
          HGPPM,
+         HGCODE,
          Total_Wetland_Hectares,
          Percent_Wetland,
          Percent_Urban,
@@ -331,6 +332,13 @@ This code builds a function that filters for:
 3. zm lakes with at least one year pre and post invasion (invasion considered without year lag) 
 4. reference lakes included with at least one year before and after 2011 (pseudo invasion 2011 - mid point of years in the analysis)
 ```{r}
+#pre lake grouping filtering (removing small fish and dealing with fish @ the LOD)
+hg.model <- hg.model %>% 
+  filter(lgthin >= 5) %>% 
+  mutate(hgppm = case_when(hgcode == "K" ~ hgppm/2,
+                           TRUE ~ hgppm))
+
+
 create_species_data <- function(species, data) {
   # Filter zebra mussel lakes
   zm_lakes <- data %>% 
@@ -425,6 +433,7 @@ species_data %>%
             min = min(lgthin),
             max = max(lgthin),
             n = n())
+
 
 rm(species_data)
 ```
@@ -1472,27 +1481,26 @@ rm(list = setdiff(all_objects, objects_to_keep))
 rm(all_objects, objects_to_keep)
 ```
 
-#checking
+#lets check the matching to make sure it is doing what we expect
 ```{r}
-zm_lakes <- hg.model %>% 
-    filter(spec == "NOP") %>% 
+  # Filter zebra mussel lakes
+  zm_lakes <- data %>% 
+    filter(spec == species) %>% 
     filter(yearcoll >= 2000) %>% 
     filter(zm_lake == "y") %>% 
-    distinct(dow, zm_sample_lag_1) %>% 
+    distinct(dow, !!sym(lag_variable)) %>% 
     group_by(dow) %>% 
     count() %>% 
     filter(n > 1)
   
-  zm_lakes <- hg.model %>% 
+  zm_lakes <- data %>% 
     filter(dow %in% zm_lakes$dow) %>% 
     distinct(dow, year_infested, centroid_lat, centroid_lon) %>% 
-    mutate(centroid_lon_orig = centroid_lon,
-           centroid_lat_orig = centroid_lat) %>% 
-    st_as_sf(coords = c("centroid_lon", "centroid_lat"), crs = 4326) 
+    st_as_sf(coords = c("centroid_lon", "centroid_lat"), crs = 4326)
 
   # Filter reference lakes
-  ref_lakes <- hg.model %>% 
-    filter(spec == "NOP") %>% 
+  ref_lakes <- data %>% 
+    filter(spec == species) %>% 
     filter(yearcoll >= 2000) %>% 
     filter(zm_lake == "n") %>% 
     filter(!is.na(centroid_lon)) %>% 
@@ -1501,23 +1509,23 @@ zm_lakes <- hg.model %>%
   ref_lakes <- ref_lakes %>% 
     mutate(nearest_zm_lake = st_nearest_feature(geometry, zm_lakes$geometry),
            nearest_infested_year = zm_lakes$year_infested[nearest_zm_lake],
-           zm_sample_lag_1 := case_when(yearcoll >= nearest_infested_year  ~ "y",
+           !!sym(lag_variable) := case_when(yearcoll >= nearest_infested_year  ~ "y",
                                        yearcoll <= nearest_infested_year ~ "n")) %>% 
-    distinct(dow, zm_sample_lag_1) %>% 
+    distinct(dow, !!sym(lag_variable)) %>% 
     group_by(dow) %>% 
     count() %>% 
     filter(n >1)
   
-  zm_fish <- hg.model %>% 
+  zm_fish <- data %>% 
     filter(yearcoll >= 2000) %>%
-    filter(spec == "NOP") %>% 
+    filter(spec == species) %>% 
     filter(dow %in% c(zm_lakes$dow)) %>% 
-     mutate(centroid_lon_orig = centroid_lon,
+    mutate(centroid_lon_orig = centroid_lon,
            centroid_lat_orig = centroid_lat) 
 
-  ref_fish <- hg.model %>% 
+  ref_fish <- data %>% 
     filter(yearcoll >= 2000) %>% 
-    filter(spec == "NOP") %>% 
+    filter(spec == species) %>% 
     filter(!is.na(centroid_lon)) %>% 
     mutate(centroid_lon_orig = centroid_lon,
            centroid_lat_orig = centroid_lat) %>% 
@@ -1525,16 +1533,16 @@ zm_lakes <- hg.model %>%
     filter(dow %in% c(ref_lakes$dow)) %>% 
     mutate(nearest_zm_lake = st_nearest_feature(geometry, zm_lakes$geometry),
            nearest_infested_year = zm_lakes$year_infested[nearest_zm_lake],
-           zm_sample_invasion_lag_1 := case_when(yearcoll >= nearest_infested_year  ~ "y",
-                                       yearcoll <= nearest_infested_year ~ "n")) 
-  
-  data <- bind_rows(ref_fish, zm_fish) %>% 
+           !!sym(lag_variable) := case_when(yearcoll >= nearest_infested_year  ~ "y",
+                                       yearcoll <= nearest_infested_year ~ "n"))  
+
+  # Combine zebra mussel and reference data
+  species_data <- bind_rows(ref_fish, zm_fish) %>% 
     st_drop_geometry() %>% 
     mutate(centroid_lat = centroid_lat_orig,
-           centroid_lon = centroid_lon_orig) %>% 
-    select()
-    glimpse()
+           centroid_lon = centroid_lon_orig) 
 ```
+
 
 
 # Old code 
@@ -1666,5 +1674,57 @@ hg_all %>%
   count() %>% 
   arrange(YEARCOLL) %>% 
   print(n = nrow(.))
+
+matching <- read_rds("baci_update_wae_zm_sample.rds")
+plot(conditional_effects(matching))
+
+marg_draws <- emmeans(matching, ~ zm_lake * zm_sample, re_formula = NA, epred = T) %>% 
+  gather_emmeans_draws() %>% 
+  mutate(hg_ppm = exp(.value))
+
+contrasts_draws <- marg_draws %>% 
+  select(-.chain, -.iteration) %>% 
+  pivot_wider(names_from = c(zm_lake, zm_sample),
+              values_from = c(.value, hg_ppm))
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  median_qi(.width = c(.66, .95))
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  pivot_longer(cols = c(diff_reference, diff_zm),
+               names_to = "zm_lake",
+               values_to = "diff") %>% 
+  mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                             TRUE ~ "Uninvaded")) %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = zm_lake, y = diff, color = zm_lake), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference in Mercury\nConcentrations Before and After (ppm)") +
+  xlab("") +
+  scale_color_manual(values = c("lightblue", "salmon")) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank()) 
+
+contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  mutate(diff_of_diff = diff_zm - diff_reference) %>% 
+  select(.draw, diff_of_diff) %>% 
+  ggplot() +
+  stat_pointinterval(aes(y = diff_of_diff), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference of Difference (ppm)") +
+  xlab("") +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank(),
+        axis.text.x = element_blank())
 ```
 
