@@ -1467,7 +1467,6 @@ combined_contrasts %>%
           panel.grid.major.x = element_blank(),
           axis.text.x = element_blank())
 ggsave("lag_zm_sensitvity_analysis.jpg", width = 7, height = 5, dpi = 600, background = "white")
->>>>>>> e228de7e17bf410730e9192a58add1c1ea174058
 ```
 
 
