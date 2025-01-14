@@ -488,38 +488,70 @@ for (species in species) {
 
 
 
-#quick data summaries 
-species_data <- bind_rows(wae_data, nop_data)
+##################build summary stats#################
+# List of all dynamically created objects
+species <- c("WAE", "NOP")
+data_list <- mget(ls(pattern = paste0("^(", paste(species, collapse = "|"), ")_zm_sample.*")))
 
-species_data %>% 
-  group_by(spec, zm_lake, zm_sample_lag_1) %>% 
+# Add a column for lag year by extracting it from the object name
+combined_data <- bind_rows(lapply(names(data_list), function(name) {
+  data <- data_list[[name]]
+  
+  # Extract lag year
+  lag_year <- sub(".*_lag_(\\d+)$", "\\1", name) # Extract lag year
+  lag_year <- ifelse(grepl("lag", name), as.numeric(lag_year), 0) # Set to 0 if not lagged
+  
+  # Standardize zm_sample column
+  if (lag_year == 0) {
+    data$zm_sample_standardized <- data$zm_sample
+  } else {
+    lag_col_name <- paste0("zm_sample_lag_", lag_year)
+    if (lag_col_name %in% colnames(data)) {
+      data$zm_sample_standardized <- data[[lag_col_name]]
+    } else {
+      data$zm_sample_standardized <- NA # Handle cases where the lag column doesn't exist
+    }
+  }
+  
+  # Add lag year column
+  data$lag_year <- lag_year
+  
+  return(data)
+}))
+
+
+
+combined_data %>% 
+  group_by(spec, zm_lake, zm_sample_standardized, lag_year) %>% 
   summarise(n_lakes = n_distinct(dow),
             n_years = n_distinct(yearcoll),
-            n_samples = n())
+            n_samples = n()) %>% 
+  print(n = nrow(.))
 
-species_data %>% 
-  group_by(spec, zm_lake) %>%
-  summarise(n_years = n_distinct(yearcoll))
-#looks like each level of zm_lake has all 23 years represented but they are not all repped at the sample level
+combined_data %>% 
+  group_by(spec, zm_lake, lag_year) %>%
+  summarise(n_years = n_distinct(yearcoll)) %>% 
+  print(n = nrow(.))
 
-species_data %>% 
-  group_by(spec, zm_lake, zm_sample_lag_1) %>% 
+combined_data %>% 
+  group_by(spec, zm_lake, zm_sample_standardized, lag_year) %>% 
+  summarise(mean = mean(lgthin),
+            sd = sd(lgthin),
+            min = min(lgthin),
+            max = max(lgthin),
+            n = n()) %>% 
+  print(n = nrow(.))
+
+combined_data %>% 
+  group_by(spec, zm_lake, lag_year) %>% 
   summarise(mean = mean(lgthin),
             sd = sd(lgthin),
             min = min(lgthin),
             max = max(lgthin),
             n = n())
 
-species_data %>% 
-  group_by(spec, zm_lake) %>% 
-  summarise(mean = mean(lgthin),
-            sd = sd(lgthin),
-            min = min(lgthin),
-            max = max(lgthin),
-            n = n())
-
-species_data %>% 
-  group_by(spec) %>% 
+combined_data %>% 
+  group_by(spec, lag_year) %>% 
   summarise(mean = mean(lgthin),
             sd = sd(lgthin),
             min = min(lgthin),
@@ -527,7 +559,68 @@ species_data %>%
             n = n())
 
 
-rm(species_data)
+#how many samples were from mille lacs?
+mille_lacs <- combined_data %>% 
+  group_by(spec,  lag_year) %>% 
+  summarise(total_sample = n(),
+            total_zm_samples = sum(zm_lake == "y"),
+            total_zm_post_samples = sum(zm_lake == "y" & zm_sample_standardized == "y"),
+            mille_lacs_samples = sum(dow == "48000200"),
+            mille_lacs_pre = sum(dow == "48000200" & zm_sample_standardized == "n"),
+            mille_lacs_invaded_samples = sum(dow == "48000200" & zm_sample_standardized == "y"),
+            total_prop_lacs = mille_lacs_samples/total_sample,
+            zm_lakes_prop_lac = mille_lacs_invaded_samples/total_zm_samples,
+            zm_lakes_post_prop_lacs = mille_lacs_invaded_samples/total_zm_post_samples) %>% 
+  arrange(spec, lag_year) 
+
+#how balanced is mille lacs?
+combined_data %>% 
+  filter(dow == "48000200") %>% 
+  group_by(spec, lag_year) %>% 
+  summarise(n_pre = sum(zm_sample_standardized == "n"),
+            n_post = sum(zm_sample_standardized == "y")) %>% 
+  arrange(spec, lag_year) %>% 
+  print(n = nrow(.))
+
+#just post samples
+mille_lacs %>% 
+  ggplot() +
+  geom_col(aes(x = lag_year, y = zm_lakes_post_prop_lacs, fill = lag_year)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  facet_wrap(~spec)
+
+#total samples
+mille_lacs %>% 
+  ggplot() +
+  geom_col(aes(x = lag_year, y = total_prop_lacs, fill = lag_year)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  facet_wrap(~spec)
+
+#number of unique lakes 
+combined_data %>% 
+  distinct(dow, zm_lake, spec, lag_year) %>% 
+  group_by(lag_year, spec, zm_lake) %>% 
+  summarise(n_lakes = n_distinct(dow)) %>% 
+  ggplot() +
+  geom_col(aes(x = lag_year, y = n_lakes, fill = lag_year)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  facet_grid(spec ~ zm_lake, scales = "free")
+
+combined_data %>% 
+  distinct(dow, zm_lake, spec, lag_year) %>% 
+  group_by(lag_year, spec, zm_lake) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            prop_lakes = 1/n_lakes) %>% 
+  ggplot() +
+  geom_col(aes(x = lag_year, y = prop_lakes, fill = lag_year)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  facet_grid(spec ~ zm_lake, scales = "free")
+#so mille lacs makes ~10% of the post invasion samples 
+rm(mille_lacs)
 ```
 
 
