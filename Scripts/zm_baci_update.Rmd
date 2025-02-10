@@ -7,10 +7,6 @@ editor_options:
   chunk_output_type: console
 ---
 
-# Things to do:
-1. decide which level of lag we would want for the analysis 
-2. finish analysis loop that auto populates figures, tables, summaries
-
 # Library
 ```{r}
 library(tidyverse)
@@ -337,6 +333,11 @@ hg.model <- hg.model %>%
   mutate(hgppm = case_when(hgcode == "K" ~ hgppm/2,
                            TRUE ~ hgppm))
 
+hg.model %>% 
+  group_by(spec) %>% 
+  count() %>% 
+  arrange(desc(n))
+
 create_species_data <- function(species, data, lag_variable) {
   # Filter zebra mussel lakes
   zm_lakes <- data %>% 
@@ -373,51 +374,51 @@ create_species_data <- function(species, data, lag_variable) {
     filter(n >1)
   
 ############this section does not filter - makes a map of connections##########
-mn_map <- states(cb = T) %>% 
-  filter(STUSPS == "MN")
-
-minnesota_sf <- st_as_sf(mn_map)
-rm(mn_map)
-  
-ref_lakes_all <- data %>% 
-    filter(spec == species) %>% 
-    filter(yearcoll >= 2000) %>% 
-    filter(zm_lake == "n") %>% 
-    filter(!is.na(centroid_lon)) %>% 
-    st_as_sf(coords = c("centroid_lon", "centroid_lat"), crs = 4326) %>% 
-  distinct(dow, geometry)
-
-lines <- ref_lakes %>%
-  inner_join(ref_lakes_all, by = c("dow")) %>% 
-  mutate(
-        nearest_zm_geometry = zm_lakes$geometry[st_nearest_feature(geometry, zm_lakes$geometry)]
-    ) %>%
-    rowwise() %>%
-    mutate(
-        line_geometry = st_sfc(st_cast(st_union(geometry, nearest_zm_geometry), "LINESTRING"))
-    ) %>%
-    ungroup() %>%
-    st_as_sf()
-
-map_data <- list(
-    ref_lakes = ref_lakes,
-    zm_lakes = zm_lakes,
-    lines = lines
-)
-
-map <- ggplot() +
-  geom_sf(data = minnesota_sf, fill = "white", color = "black") +
-    geom_sf(data = map_data$lines$geometry, aes(color = "Reference Lakes"), size = 3) +
-    geom_sf(data = map_data$zm_lakes, aes(color = "ZM Lakes"), size = 3, shape = 17) +
-    geom_sf(data = map_data$lines, aes(geometry = line_geometry, color = "Connections"), linetype = "dashed", size = 0.8) +
-    scale_color_manual(
-        values = c("Reference Lakes" = "lightblue", "ZM Lakes" = "salmon", "Connections" = "black"),
-        name = ""
-    ) +
-  labs(title = paste(species, lag_variable)) +
-    theme_minimal()  +
-  theme(legend.position = "bottom")
-rm(lines, map_data, ref_lakes_all)
+# mn_map <- states(cb = T) %>% 
+#   filter(STUSPS == "MN")
+# 
+# minnesota_sf <- st_as_sf(mn_map)
+# rm(mn_map)
+#   
+# ref_lakes_all <- data %>% 
+#     filter(spec == species) %>% 
+#     filter(yearcoll >= 2000) %>% 
+#     filter(zm_lake == "n") %>% 
+#     filter(!is.na(centroid_lon)) %>% 
+#     st_as_sf(coords = c("centroid_lon", "centroid_lat"), crs = 4326) %>% 
+#   distinct(dow, geometry)
+# 
+# lines <- ref_lakes %>%
+#   inner_join(ref_lakes_all, by = c("dow")) %>% 
+#   mutate(
+#         nearest_zm_geometry = zm_lakes$geometry[st_nearest_feature(geometry, zm_lakes$geometry)]
+#     ) %>%
+#     rowwise() %>%
+#     mutate(
+#         line_geometry = st_sfc(st_cast(st_union(geometry, nearest_zm_geometry), "LINESTRING"))
+#     ) %>%
+#     ungroup() %>%
+#     st_as_sf()
+# 
+# map_data <- list(
+#     ref_lakes = ref_lakes,
+#     zm_lakes = zm_lakes,
+#     lines = lines
+# )
+# 
+# map <- ggplot() +
+#   geom_sf(data = minnesota_sf, fill = "white", color = "black") +
+#     geom_sf(data = map_data$lines$geometry, aes(color = "Reference Lakes"), size = 3) +
+#     geom_sf(data = map_data$zm_lakes, aes(color = "ZM Lakes"), size = 3, shape = 17) +
+#     geom_sf(data = map_data$lines, aes(geometry = line_geometry, color = "Connections"), linetype = "dashed", size = 0.8) +
+#     scale_color_manual(
+#         values = c("Reference Lakes" = "lightblue", "ZM Lakes" = "salmon", "Connections" = "black"),
+#         name = ""
+#     ) +
+#   labs(title = paste(species, lag_variable)) +
+#     theme_minimal()  +
+#   theme(legend.position = "bottom")
+# rm(lines, map_data, ref_lakes_all)
 ##############################################################################
   
   zm_fish <- data %>% 
@@ -451,7 +452,8 @@ rm(lines, map_data, ref_lakes_all)
   # Scale length
    # Scale length
   species_data <- species_data %>% 
-    mutate(scaled_length = c(scale(lgthin))) %>% 
+    mutate(lgthmm = lgthin/0.0393701,
+           scaled_length = c(scale(lgthmm))) %>% 
     select(waterway,
            dow,
            centroid_lat,
@@ -461,18 +463,24 @@ rm(lines, map_data, ref_lakes_all)
            spec,
            anathg,
            lgthin,
+           lgthmm,
            scaled_length,
            hgppm,
+           hgcode,
            zm_lake,
            !!sym(lag_variable)
            )
-  print(map)
+  #print(map)
   return(species_data)
 }
 
 #example of how to get one species and lag year
 wae_data <- create_species_data(species = "WAE", data = hg.model, lag_variable = "zm_sample_lag_2")
 nop_data <- create_species_data(species = "NOP", data = hg.model, lag_variable = "zm_sample_lag_2")
+blg_data <- create_species_data(species = "BLG", data = hg.model, lag_variable = "zm_sample_lag_2")
+blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable = "zm_sample_lag_2")
+lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
+yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
 
 #loop over all combos of NOP and WAE zm_sample to zm_sample_lag_year_5
 species <- c("WAE", "NOP")
@@ -507,10 +515,10 @@ rm(lakes)
 
 fish <- combined_data %>% 
   group_by(spec, zm_lake, zm_sample_lag_2) %>% 
-  summarise(mean = mean(lgthin),
-            sd = sd(lgthin),
-            min = min(lgthin),
-            max = max(lgthin),
+  summarise(mean = mean(lgthmm),
+            sd = sd(lgthmm),
+            min = min(lgthmm),
+            max = max(lgthmm),
             n = n()) %>% 
   print(n = nrow(.))
 write_csv(fish, "baci_fish_pre_post_stats.csv")
@@ -518,24 +526,73 @@ rm(fish)
 
 fish <- combined_data %>% 
   group_by(spec, zm_lake) %>% 
-  summarise(mean = mean(lgthin),
-            sd = sd(lgthin),
-            min = min(lgthin),
-            max = max(lgthin),
+  summarise(mean = mean(lgthmm),
+            sd = sd(lgthmm),
+            min = min(lgthmm),
+            max = max(lgthmm),
             n = n())
 write_csv(fish, "baci_fish_invasion_stats.csv")
 rm(fish)
 
 fish <- combined_data %>% 
   group_by(spec) %>% 
-  summarise(mean = mean(lgthin),
-            sd = sd(lgthin),
-            min = min(lgthin),
-            max = max(lgthin),
+  summarise(mean = mean(lgthmm),
+            sd = sd(lgthmm),
+            min = min(lgthmm),
+            max = max(lgthmm),
             n_lakes = n_distinct(dow),
             n = n())
 write_csv(fish, "baci_fish_spec_stats.csv")
 rm(fish)
+
+#limit of detection?
+combined_data %>% 
+  filter(hgcode == "K") %>% 
+  group_by(hgcode, hgppm, spec) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+#how many unique lakes across species
+combined_data %>% 
+  group_by(zm_lake) %>% 
+  summarise(n_distinct(dow))
+
+#other species?
+blg_data <- create_species_data(species = "BLG", data = hg.model, lag_variable = "zm_sample_lag_2")
+blg_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+blg_data %>% 
+  filter(zm_lake == "y") %>% 
+  group_by(waterway, zm_sample_lag_2) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
+lmb_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable = "zm_sample_lag_2")
+blc_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
+yep_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+rm(blc_data, blg_data, lmb_data, yep_data)
 ```
 
 #Summary Stats - looping over zm lag year with matching - ref lag does not change
@@ -715,7 +772,7 @@ lakes_sf <- lakes_sf %>%
                              species == "Walleye" ~ "Walleye"))
 
 #simple map showing lake locations by species 
-ggplot() +
+mn_map <- ggplot() +
   # Plot Minnesota state
   geom_sf(data = minnesota_sf, fill = "white", color = "black") +
   
@@ -735,9 +792,32 @@ ggplot() +
         legend.key.size = unit(.2, "cm")) +
   annotation_scale(location = "tl") +
   annotation_north_arrow(location = "br", which_north = "true")
+mn_map
 ggsave("BACI_lakes_map.jpg", height = 7, width = 7, dpi = 600, bg = "white")
 
-rm(lake_summary, lakes_sf, map_data, minnesota_sf, spec)
+#with inset
+us_sf <- st_as_sf(maps::map("state", plot = F, fill = T))
+
+us_map <- ggplot() +
+  geom_sf(data = us_sf, fill = "gray90", color = "black", size = 0.3) +
+  geom_sf(data = minnesota_sf, fill = "red", color = "black") +
+  theme_void()
+
+inset_x <- 0.7
+inset_y <- 0.8
+inset_width <- 0.22
+inset_height <- 0.15
+
+ggdraw(mn_map) +
+  draw_plot(us_map, x = 0.7, y = 0.76, width = 0.22, height = 0.22) +
+  draw_line(x = c(inset_x, inset_x + inset_width), y = c(inset_y, inset_y), color = "black", size = 1) +  
+  draw_line(x = c(inset_x, inset_x + inset_width), y = c(inset_y + inset_height, inset_y + inset_height), color = "black", size = 1) +  
+  draw_line(x = c(inset_x, inset_x), y = c(inset_y, inset_y + inset_height), color = "black", size = 1) +  
+  draw_line(x = c(inset_x + inset_width, inset_x + inset_width), y = c(inset_y, inset_y + inset_height), color = "black", size = 1)  
+ggsave("BACI_lakes_map_inset.jpg", height = 7, width = 7, dpi = 600, bg = "white")
+
+
+rm(lake_summary, lakes_sf, minnesota_sf, spec, inset_height, inset_width, inset_x, inset_y, mn_map, us_sf, us_map)
 ```
 
 # Analysis 
@@ -759,15 +839,51 @@ fit_nop <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + 
              iter = 20000,
              warmup = 5000)
 #saveRDS(fit_nop, "baci_update_nop.rds")
+
+fit_blg <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = blg_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_blg, "baci_update_blg.rds")
+
+fit_blc <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = blc_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_blc, "baci_update_blc.rds")
+
+fit_lmb <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = lmb_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_lmb, "baci_update_lmb.rds")
+
+fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = yep_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_yep, "baci_update_yep.rds")
 ```
 
 saved model runs
 ```{r}
 fit_wae <- readRDS("Output/BACI/baci_update_wae.rds")
 fit_nop <- readRDS("Output/BACI/baci_update_nop.rds")
+fit_blg <- readRDS("baci_update_blg.rds")
+fit_blc <- readRDS("baci_update_blc.rds")
+fit_lmb <- readRDS("baci_update_lmb.rds")
+fit_yep <- readRDS("baci_update_yep.rds")
 
 summary(fit_wae)
 summary(fit_nop)
+summary(fit_blg)
+summary(fit_blc)
+summary(fit_lmb)
+summary(fit_yep)
 ```
 
 2. looping over all NOP and WAE combos of zm_lag for sensitivity analysis 
@@ -924,9 +1040,9 @@ ggsave("lag_zm_sensitvity_analysis.jpg", width = 7, height = 5, dpi = 600, backg
 #############create data for plotting###############
 #marginal effects based on specific length
 length_stats <-  nop_data %>% 
-  summarise(mean_length = mean(lgthin),
-            sd_length = sd(lgthin))
-specific_length_scaled <- (24 - length_stats$mean_length) / length_stats$sd_length
+  summarise(mean_length = mean(lgthmm),
+            sd_length = sd(lgthmm))
+specific_length_scaled <- (610 - length_stats$mean_length) / length_stats$sd_length
 
 marg_draws <- emmeans(fit_nop, ~ zm_lake * zm_sample_lag_2, 
                       at = list(scaled_length = specific_length_scaled), 
@@ -1076,6 +1192,12 @@ summary_percent_change <- percent_changes %>%
   )
 write_csv(summary_percent_change, "nop_change_summary_stats.csv")
 
+marg_draws %>% 
+  mutate(exp_ppm = exp(.value)) %>% 
+  select(zm_lake, zm_sample_lag_2, .draw, exp_ppm) %>% 
+  group_by(zm_lake, zm_sample_lag_2) %>% 
+  median_qi() %>% 
+  write_csv("nop_values_ppm_marg_eff.csv")
 
 ##############length vs ppm & probability of exceed############################
 length_ranges <- nop_data %>% 
@@ -1089,7 +1211,7 @@ length_seq <- length_ranges %>%
 rm(length_ranges)
 
 length.stats <- nop_data %>% 
-  summarise(mean.length=mean(lgthin), sd.length=sd(lgthin), min.length=min(lgthin), max.length=max(lgthin))
+  summarise(mean.length=mean(lgthmm), sd.length=sd(lgthmm), min.length=min(lgthmm), max.length=max(lgthmm))
 
 pred_data <- expand_grid(zm_lake = c("y", "n"),
                          zm_sample_lag_2 = c("y", "n"),
@@ -1099,9 +1221,9 @@ prob_exceed <- fit_nop %>%
   add_predicted_draws(newdata = pred_data, re_formula = NA) %>% 
   mutate(mean_length = length.stats$mean.length,
          sd_length = length.stats$sd.length) %>% 
-  mutate(lgthin =(scaled_length*sd_length)+mean_length) %>% 
+  mutate(lgthmm =(scaled_length*sd_length)+mean_length) %>% 
   mutate(is_above_threshold = .prediction > log(.22)) %>%
-  group_by(zm_lake, zm_sample_lag_2, lgthin) %>% 
+  group_by(zm_lake, zm_sample_lag_2, lgthmm) %>% 
   summarise(prob = mean(is_above_threshold), .groups = 'drop') %>% 
   mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
                              zm_lake == "n" ~ "Reference"))
@@ -1110,35 +1232,35 @@ pred_lengths <- fit_nop %>%
   add_predicted_draws(newdata = pred_data, re_formula = NA) %>% 
   mutate(mean_length = length.stats$mean.length,
          sd_length = length.stats$sd.length) %>% 
-  mutate(lgthin =(scaled_length*sd_length)+mean_length) %>% 
-  group_by(zm_lake, zm_sample_lag_2, lgthin) %>% 
+  mutate(lgthmm =(scaled_length*sd_length)+mean_length) %>% 
+  group_by(zm_lake, zm_sample_lag_2, lgthmm) %>% 
   summarise(median=median(exp(.prediction)), lci=quantile(exp(.prediction), .025), uci=quantile(exp(.prediction), 0.975)) %>% 
-  mutate(smoothed_uci = predict(loess(uci ~ lgthin, span = 0.5)),
-         smoothed_lci = predict(loess(lci ~ lgthin, span = 0.5)),
-         smoothed_median = predict(loess(median ~ lgthin, span = 0.5))) %>%
+  mutate(smoothed_uci = predict(loess(uci ~ lgthmm, span = 0.5)),
+         smoothed_lci = predict(loess(lci ~ lgthmm, span = 0.5)),
+         smoothed_median = predict(loess(median ~ lgthmm, span = 0.5))) %>%
   ungroup() %>% 
   mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
                              zm_lake == "n" ~ "Reference"))
 
 #prob of exceed stats and plot
-#15 inch fish
+#24 inch fish
 prob_exceed %>% 
-  mutate(distance = abs(lgthin - 24)) %>% 
+  mutate(distance = abs(lgthmm - 610)) %>% 
   filter(distance == min(distance)) %>%
-  select(zm_lake, zm_sample_lag_2, lgthin, prob, distance) %>% 
+  select(zm_lake, zm_sample_lag_2, lgthmm, prob, distance) %>% 
   write_csv("nop_prob_exceeding_24_in.csv")
 
 #for each draw from the posterior, we generate a prediction based on length, zm_lake, and zm_sample
 #to get the probability of exceeding 0.22 ppm, we ask if the prediction is over 0.22. We then find the average # over vs the total for each length/zm
 #the slight dip at large values is a result of random noise in the drawing from the posterior and inconsequential to the result - ex. large lengths have larger variation in preiditon - increasing the chace that at least one value may end up smaller than 0.22ppm
 vert_line <- prob_exceed %>% 
-  mutate(distance = abs(lgthin - 24)) %>% 
+  mutate(distance = abs(lgthmm - 610)) %>% 
   filter(distance == min(distance))
 
 pike_length_probs <- ggplot() +
-  geom_line(data = prob_exceed, aes(x = lgthin, y = prob, color = zm_sample_lag_2)) + 
-  geom_point(data = vert_line, aes(x =lgthin, y = prob, color = zm_sample_lag_2)) +
-  geom_line(data = vert_line, aes(x = lgthin, y = prob, group = zm_lake)) +
+  geom_line(data = prob_exceed, aes(x = lgthmm, y = prob, color = zm_sample_lag_2)) + 
+  geom_point(data = vert_line, aes(x =lgthmm, y = prob, color = zm_sample_lag_2)) +
+  geom_line(data = vert_line, aes(x = lgthmm, y = prob, group = zm_lake)) +
   facet_wrap(~zm_lake, scales = "free_x") +
   scale_colour_manual(values=c("#00CCCC", "#FF6666"), labels=c("Before", "After")) +
   ylim(c(-0.01,1.01)) +
@@ -1168,16 +1290,16 @@ pike_length_probs
 pike_length_ppm <- ggplot() +
   facet_wrap(~zm_lake, scales='free') +
   theme_bw() +
-  geom_ribbon(data = pred_lengths, aes(x = lgthin, y = median, color = zm_sample_lag_2, ymax = smoothed_uci, ymin = smoothed_lci, fill = zm_sample_lag_2), lwd = 0, alpha = .3) + # alpha is transparency
-  geom_line(data = pred_lengths, lwd = 1, aes(x = lgthin, y = median, color = zm_sample_lag_2, lty = zm_sample_lag_2)) + # center line of ribbon
+  geom_ribbon(data = pred_lengths, aes(x = lgthmm, y = median, color = zm_sample_lag_2, ymax = smoothed_uci, ymin = smoothed_lci, fill = zm_sample_lag_2), lwd = 0, alpha = .3) + # alpha is transparency
+  geom_line(data = pred_lengths, lwd = 1, aes(x = lgthmm, y = median, color = zm_sample_lag_2, lty = zm_sample_lag_2)) + # center line of ribbon
   geom_point(data = nop_data %>% 
                mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
-                             zm_lake == "n" ~ "Reference")), aes(x = lgthin, y = hgppm, color = zm_sample_lag_2), alpha = .2) +
+                             zm_lake == "n" ~ "Reference")), aes(x = lgthmm, y = hgppm, color = zm_sample_lag_2), alpha = .2) +
   scale_linetype_manual(values = c(1, 6), labels = c("Before", "After")) + # to tell it which line type you want
   scale_colour_manual(values = c("#00CCCC", "#FF6666"), labels = c("Before", "After")) +
   scale_fill_manual(values = c("#00CCCC", "#FF6666"), labels = c("Before", "After")) +
   ylab("Mercury Concentration (ppm)") +
-  xlab("Fish Length (in)") +
+  xlab("Fish Length (mm)") +
   labs(fill = "Invasion status", lty = "Invasion status", color = "Invasion status", labels = c("Before", "After")) +
   geom_hline(yintercept = 0.22) +
   theme(strip.background = element_blank(), 
@@ -1197,6 +1319,20 @@ pike_length_ppm
 pike_length_ppm <- ggdraw(pike_length_ppm) +
   pike_outline
 pike_length_ppm
+
+#stat for when fish cross the line?
+pred_lengths %>% 
+  mutate(distance = abs(median - 0.22)) %>% 
+  group_by(zm_lake, zm_sample_lag_2) %>% 
+  filter(distance == min(distance)) %>%
+  select(zm_lake, zm_sample_lag_2, lgthmm) %>% 
+  pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+              values_from = lgthmm) %>% 
+  mutate(percent_change_reference = ((Reference_y - Reference_n)/Reference_n)*100,
+         percent_change_zm = ((`Zebra Mussel_y` - `Zebra Mussel_n`)/`Zebra Mussel_n`)*100,
+         diff_of_change = percent_change_zm - percent_change_reference) %>% 
+  write_csv("nop_percent_change_crossing_lengths.csv")
+
 rm(pred_lengths, pred_data)
 
 
@@ -1337,9 +1473,9 @@ rm(combined_plot, contrasts_draws, fit_nop, marg_draws, pike_outline, diff_lakes
 #############create data for plotting###############
 #marginal effects based on specific length
 length_stats <-  wae_data %>% 
-  summarise(mean_length = mean(lgthin),
-            sd_length = sd(lgthin))
-specific_length_scaled <- (15 - length_stats$mean_length) / length_stats$sd_length
+  summarise(mean_length = mean(lgthmm),
+            sd_length = sd(lgthmm))
+specific_length_scaled <- (381 - length_stats$mean_length) / length_stats$sd_length
 
 marg_draws <- emmeans(fit_wae, ~ zm_lake * zm_sample_lag_2, 
                       at = list(scaled_length = specific_length_scaled), 
@@ -1487,6 +1623,13 @@ summary_percent_change <- percent_changes %>%
   )
 write_csv(summary_percent_change, "wae_change_summary_stats.csv")
 
+marg_draws %>% 
+  mutate(exp_ppm = exp(.value)) %>% 
+  select(zm_lake, zm_sample_lag_2, .draw, exp_ppm) %>% 
+  group_by(zm_lake, zm_sample_lag_2) %>% 
+  median_qi() %>% 
+  write_csv("wae_values_ppm_marg_eff.csv")
+
 
 ##############length vs ppm & probability of exceed############################
 length_ranges <- wae_data %>% 
@@ -1500,7 +1643,7 @@ length_seq <- length_ranges %>%
 rm(length_ranges)
 
 length.stats <- wae_data %>% 
-  summarise(mean.length=mean(lgthin), sd.length=sd(lgthin), min.length=min(lgthin), max.length=max(lgthin))
+  summarise(mean.length=mean(lgthmm), sd.length=sd(lgthmm), min.length=min(lgthmm), max.length=max(lgthmm))
 
 pred_data <- expand_grid(zm_lake = c("y", "n"),
                          zm_sample_lag_2 = c("y", "n"),
@@ -1510,9 +1653,9 @@ prob_exceed <- fit_wae %>%
   add_predicted_draws(newdata = pred_data, re_formula = NA) %>% 
   mutate(mean_length = length.stats$mean.length,
          sd_length = length.stats$sd.length) %>% 
-  mutate(lgthin =(scaled_length*sd_length)+mean_length) %>% 
+  mutate(lgthmm =(scaled_length*sd_length)+mean_length) %>% 
   mutate(is_above_threshold = .prediction > log(.22)) %>% 
-  group_by(zm_lake, zm_sample_lag_2, scaled_length, lgthin) %>% 
+  group_by(zm_lake, zm_sample_lag_2, scaled_length, lgthmm) %>% 
   summarise(prob = mean(is_above_threshold), .groups = 'drop') %>% 
   mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
                              zm_lake == "n" ~ "Reference"))
@@ -1527,7 +1670,7 @@ prob_exceed <- fit_wae %>%
 #   add_predicted_draws(newdata = pred_data, re_formula = NA) %>% 
 #   mutate(mean_length = length.stats$mean.length,
 #          sd_length = length.stats$sd.length) %>% 
-#   mutate(lgthin =(scaled_length*sd_length)+mean_length) %>% 
+#   mutate(lgthmm =(scaled_length*sd_length)+mean_length) %>% 
 #   mutate(is_above_threshold = .prediction > log(.22))
 # 
 # weird_draw <- prob_exceed_raw %>% 
@@ -1558,12 +1701,12 @@ pred_lengths <- fit_wae %>%
   add_predicted_draws(newdata = pred_data, re_formula = NA) %>% 
   mutate(mean_length = length.stats$mean.length,
          sd_length = length.stats$sd.length) %>% 
-  mutate(lgthin =(scaled_length*sd_length)+mean_length) %>% 
-  group_by(zm_lake, zm_sample_lag_2, lgthin) %>% 
+  mutate(lgthmm =(scaled_length*sd_length)+mean_length) %>% 
+  group_by(zm_lake, zm_sample_lag_2, lgthmm) %>% 
   summarise(median=median(exp(.prediction)), lci=quantile(exp(.prediction), .025), uci=quantile(exp(.prediction), 0.975)) %>% 
-  mutate(smoothed_uci = predict(loess(uci ~ lgthin, span = 0.5)),
-         smoothed_lci = predict(loess(lci ~ lgthin, span = 0.5)),
-         smoothed_median = predict(loess(median ~ lgthin, span = 0.5))) %>%
+  mutate(smoothed_uci = predict(loess(uci ~ lgthmm, span = 0.5)),
+         smoothed_lci = predict(loess(lci ~ lgthmm, span = 0.5)),
+         smoothed_median = predict(loess(median ~ lgthmm, span = 0.5))) %>%
   ungroup() %>% 
   mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
                              zm_lake == "n" ~ "Reference"))
@@ -1573,26 +1716,26 @@ pred_lengths <- fit_wae %>%
 prob_exceed %>% 
   mutate(mean_length = length.stats$mean.length,
          sd_length = length.stats$sd.length) %>% 
-  mutate(lgthin =(scaled_length*sd_length)+mean_length) %>% 
-  mutate(distance = abs(lgthin - 15)) %>% 
+  mutate(lgthmm =(scaled_length*sd_length)+mean_length) %>% 
+  mutate(distance = abs(lgthmm - 381)) %>% 
   filter(distance == min(distance)) %>%
-  select(zm_lake, zm_sample_lag_2, lgthin, prob, distance) %>% 
+  select(zm_lake, zm_sample_lag_2, lgthmm, prob, distance) %>% 
   write_csv("wae_prob_exceeding_15_in.csv")
 
 #for each draw from the posterior, we generate a prediction based on length, zm_lake, and zm_sample
 #to get the probability of exceeding 0.22 ppm, we ask if the prediction is over 0.22. We then find the average # over vs the total for each length/zm
 vert_line <- prob_exceed %>% 
-  mutate(distance = abs(lgthin - 15)) %>% 
+  mutate(distance = abs(lgthmm - 381)) %>% 
   filter(distance == min(distance)) 
 
 walleye_length_probs <- ggplot() +
-  geom_line(data = prob_exceed, aes(x = lgthin, y = prob, color = zm_sample_lag_2)) + 
-  geom_point(data = vert_line, aes(x = lgthin, y = prob, color = zm_sample_lag_2)) +
-  geom_line(data = vert_line, aes(x = lgthin, y = prob, group = zm_lake)) +
+  geom_line(data = prob_exceed, aes(x = lgthmm, y = prob, color = zm_sample_lag_2)) + 
+  geom_point(data = vert_line, aes(x = lgthmm, y = prob, color = zm_sample_lag_2)) +
+  geom_line(data = vert_line, aes(x = lgthmm, y = prob, group = zm_lake)) +
   facet_wrap(~zm_lake, scales = "free_x") +
   scale_colour_manual(values=c("#00CCCC", "#FF6666"), labels=c("Before", "After")) +
   ylim(c(-0.05,1.05)) +
-  xlab("Length (in)") +
+  xlab("Length (mm)") +
   ylab("Probability of Exceeding 0.22 ppm") +
   theme_bw() +
   theme(strip.background = element_blank(), 
@@ -1601,6 +1744,7 @@ walleye_length_probs <- ggplot() +
         legend.background = element_blank(), 
         panel.grid = element_blank(), 
         strip.text = element_text(size = 13))
+walleye_length_probs
 ggsave("wae_baci_prob_exeeding_length.jpg", width = 11, height = 7, dpi = 600, bg = "white")
 
 walleye_length_probs <- walleye_length_probs +
@@ -1615,16 +1759,16 @@ walleye_length_probs
 walleye_length_ppm <- ggplot() +
   facet_wrap(~zm_lake, scales='free') +
   theme_bw() +
-  geom_ribbon(data = pred_lengths, aes(x = lgthin, y = median, color = zm_sample_lag_2, ymax = smoothed_uci, ymin = smoothed_lci, fill = zm_sample_lag_2), lwd = 0, alpha = .3) + # alpha is transparency
-  geom_line(data = pred_lengths, lwd = 1, aes(x = lgthin, y = median, color = zm_sample_lag_2, lty = zm_sample_lag_2)) + # center line of ribbon
+  geom_ribbon(data = pred_lengths, aes(x = lgthmm, y = median, color = zm_sample_lag_2, ymax = smoothed_uci, ymin = smoothed_lci, fill = zm_sample_lag_2), lwd = 0, alpha = .3) + # alpha is transparency
+  geom_line(data = pred_lengths, lwd = 1, aes(x = lgthmm, y = median, color = zm_sample_lag_2, lty = zm_sample_lag_2)) + # center line of ribbon
   geom_point(data = wae_data %>% 
                mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
-                             zm_lake == "n" ~ "Reference")), aes(x = lgthin, y = hgppm, color = zm_sample_lag_2), alpha = .2) +
+                             zm_lake == "n" ~ "Reference")), aes(x = lgthmm, y = hgppm, color = zm_sample_lag_2), alpha = .2) +
   scale_linetype_manual(values = c(1, 6), labels = c("Before", "After")) + # to tell it which line type you want
   scale_colour_manual(values = c("#00CCCC", "#FF6666"), labels = c("Before", "After")) +
   scale_fill_manual(values = c("#00CCCC", "#FF6666"), labels = c("Before", "After")) +
   ylab("Mercury Concentration (ppm)") +
-  xlab("Fish Length (in)") +
+  xlab("Fish Length (mm)") +
   labs(fill = "Invasion status", lty = "Invasion status", color = "Invasion status", labels = c("Before", "After")) +
   geom_hline(yintercept = 0.22) +
   theme(strip.background = element_blank(), 
@@ -1637,7 +1781,23 @@ walleye_length_ppm <- ggdraw(walleye_length_ppm) +
   walleye_outline
 walleye_length_ppm
 ggsave("wae_length_ppm_invasion.jpg", width = 11, height = 7, dpi = 600)
+
+#stat for when fish cross the line?
+pred_lengths %>% 
+  mutate(distance = abs(median - 0.22)) %>% 
+  group_by(zm_lake, zm_sample_lag_2) %>% 
+  filter(distance == min(distance)) %>%
+  select(zm_lake, zm_sample_lag_2, lgthmm) %>% 
+  pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+              values_from = lgthmm) %>% 
+  mutate(percent_change_reference = ((Reference_y - Reference_n)/Reference_n)*100,
+         percent_change_zm = ((`Zebra Mussel_y` - `Zebra Mussel_n`)/`Zebra Mussel_n`)*100,
+         diff_of_change = percent_change_zm - percent_change_reference) %>% 
+  write_csv("wae_percent_change_crossing_lengths.csv")
+
 rm(pred_lengths, pred_data)
+
+
 #############everything below is more exploratory###########################
 
 ##matching Blinick et al. 2024
@@ -1982,6 +2142,95 @@ ggsave("rand_year_effect.jpg", combined_rand_eff_year, height = 5, width = 7, dp
 
 rm(ranef_year_wae_raw, ranef_year_nop_raw, ranef_year_wae, ranef_year_nop, walleye_outline, pike_outline, combined_rand_eff_year)
 ```
+
+# PUlling Leech Lake Random Effects
+```{r}
+#11014700 - winni
+#04003000 - cass
+#11020300 - Leech
+
+#raw plots
+combined_data %>%
+  filter(dow %in% c("11014700", "04003000", "11020300")) %>% 
+  mutate(spec = case_when(spec == "WAE" ~ "Walleye",
+                          spec == "NOP" ~ "Nothern Pike")) %>% 
+  ggplot() +
+  geom_point(aes(lgthmm, hgppm, color = zm_sample_lag_2)) +
+  geom_smooth(aes(lgthmm, hgppm, color = zm_sample_lag_2), se = F, method = "lm", formula = y ~ poly(x, 2)) +
+  geom_hline(yintercept = 0.22, linetype = "dashed") +
+  scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Pre-Invasion", "Zebra Mussel")) +
+  facet_grid(spec ~ waterway) +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+ggsave("raw_data_poly_fit.jpg")
+
+#random effects
+pred_data <- wae_data %>% 
+  filter(dow %in% c("11014700", "04003000", "11020300")) %>%
+  select(dow, 
+         scaled_length,
+         zm_lake,
+         zm_sample_lag_2,
+         yearcoll)
+
+predition_data_wae <- pred_data %>% 
+  add_epred_draws(fit_wae) %>% 
+  median_qi(lake.median = exp(.epred), .width = c(.95)) 
+
+predition_data_wae %>% 
+  ggplot() +
+  geom_point(aes(scaled_length, lake.median, color = zm_sample_lag_2)) +
+  geom_smooth(aes(scaled_length, lake.median, color = zm_sample_lag_2)) +
+  scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Pre-Invasion", "Zebra Mussel")) +
+  facet_grid(~dow) +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+#pike
+pred_data <- nop_data %>% 
+  filter(dow %in% c("11014700", "04003000", "11020300")) %>%
+  select(dow, 
+         scaled_length,
+         zm_lake,
+         zm_sample_lag_2,
+         yearcoll)
+
+predition_data_nop <- pred_data %>% 
+  add_epred_draws(fit_nop) %>% 
+  median_qi(lake.median = exp(.epred), .width = c(.95)) 
+
+predition_data_nop %>% 
+  ggplot() +
+  geom_point(aes(scaled_length, lake.median, color = zm_sample_lag_2)) +
+  geom_smooth(aes(scaled_length, lake.median, color = zm_sample_lag_2)) +
+  scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Pre-Invasion", "Zebra Mussel")) +
+  facet_grid(~dow) +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+#combined
+pred_nop_wae <- bind_rows(predition_data_nop %>% 
+                            mutate(spec = "Northern Pike"), 
+                          predition_data_wae %>% 
+                            mutate(spec = "Walleye"))  %>% 
+  mutate(waterway = case_when(dow == "11020300" ~ "LEECH",
+                               dow == "04003000" ~ "CASS",
+                               dow == "11014700" ~ "WINNIBIGOSHISH"))
+
+#update this plot with the actual raw data in the background 
+#for this plot, the modeled lines can be constructed of more than just the observed lengths 
+pred_nop_wae %>% 
+  ggplot() +
+  geom_point(aes(scaled_length, lake.median, color = zm_sample_lag_2)) +
+  geom_smooth(aes(scaled_length, lake.median, color = zm_sample_lag_2), se = F) +
+  geom_hline(yintercept = 0.22, linetype = "dashed") +
+  scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Pre-Invasion", "Zebra Mussel")) +
+  facet_grid(spec~waterway) +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+ggsave("modeled_random_effects.jpg")
+```
+
 
 ##############################################################################
 

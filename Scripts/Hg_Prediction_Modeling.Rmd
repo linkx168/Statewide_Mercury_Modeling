@@ -1110,6 +1110,34 @@ summary(fit.gp)
 plot(fit.gp)
 ```
 
+#lscale plotting
+```{r}
+exp_quad_kernel <- function(distance, lscale) {
+  exp(-distance^2 / (2 * lscale^2))
+}
+
+# Generate data
+lscale <- 10
+distances <- seq(0, 50, length.out = 500)
+correlations <- exp_quad_kernel(distances, lscale)
+data <- data.frame(distance = distances, correlation = correlations)
+
+# Create the plot
+ggplot(data, aes(x = distance, y = correlation)) +
+  geom_line(color = "blue", size = 1) +
+  geom_hline(yintercept = 0.5, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = 0.001, color = "green", linetype = "dashed") +
+  labs(
+    title = "Gaussian Process Correlation vs. Distance",
+    x = "Distance (km)",
+    y = "Correlation"
+  ) +
+  theme_minimal(base_size = 14) +
+  annotate("text", x = 15, y = 0.52, label = "Correlation = 0.5", color = "red", size = 4, hjust = 0) +
+  annotate("text", x = 40, y = 0.01, label = "Correlation = 0.001", color = "green", size = 4, hjust = 0)
+```
+
+
 #Leave the recent year out
 ```{r}
 hg.data <- hg.model %>% 
@@ -1676,9 +1704,7 @@ lake_level_check <- combined %>%
 rm(lake_level_check)
 ```
 
-
 ###########All code below is exploratory##########################
-
 #GLIFWC
 ```{r}
 glifwc <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg.csv")) %>% 
