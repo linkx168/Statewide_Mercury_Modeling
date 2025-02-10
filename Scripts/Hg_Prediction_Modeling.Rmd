@@ -41,7 +41,7 @@ library(emmeans)
 #Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -72,7 +72,7 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
@@ -100,7 +100,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -231,125 +231,8 @@ hg.data <- hg.model %>%
   filter(!(scaled_length > 3 | scaled_length < -3)) 
 rm(hg, hg.model)
 
-#############lscale prior inverse gamma with 1% prob below 20 or above 600#####
-fit.gp <- brm(log_hg ~ 
-                scaled_length*SPEC + 
-                SPEC + 
-                scaled_logit_wetlands + 
-                scaled_logit_urban +
-                scaled_logit_ag + 
-                scaled_log_WS_Lake_Ratio + 
-                scaled_log_area + 
-                zm_sample +
-                gp(easting, northing, gr = T,  scale = F),
-              prior = prior(inv_gamma(3, 664), class = "lscale", coef = "gpeastingnorthing"),
-                     data = hg.data,
-                     iter = 10000,
-                     warmup = 500,
-                     chains = 3,
-                     family = gaussian(),
-                     cores = 12)
-
-#saveRDS(fit.gp, "statewide_gp_lscale_prior.rds")
-fit.gp <- readRDS("statewide_gp_lscale_prior.rds")
-
-summary(fit.gp)
-plot(fit.gp)
-
-#inspect the prior
-prior_summary(fit.gp)
-get_variables(fit.gp)
-
-post_lscale <- fit.gp %>% 
-  spread_draws(lscale_gpeastingnorthing)
-
-# Define the parameters for the prior
-inv_gamma_density <- function(x, shape, scale) {
-  ifelse(x > 0, (scale^shape) * exp(-scale / x) / (gamma(shape) * x^(shape + 1)), 0)
-}
-
-shape <- 3
-scale <- 664
-
-# Create a sequence of values for lscale
-x_values <- seq(0.01, 600, length.out = 1000) # Avoid 0 since lscale > 0
-
-# Compute the density
-y_values <- inv_gamma_density(x_values, shape, scale)
-
-# Create a data frame for plotting
-prior_data <- data.frame(lscale = x_values, density = y_values)
-
-# Plot the prior
-ggplot(prior_data, aes(x = lscale, y = density)) +
-  geom_line(color = "blue", size = 1) +
-  labs(
-    title = "Default Prior for lscale",
-    x = "lscale (length scale)",
-    y = "Density"
-  ) +
-  geom_vline(xintercept = c(20, 600), color = "red")+
-  theme_minimal()
-
-#compare the plot
-post_lscale %>% 
-  ggplot() +
-  geom_density(aes(lscale_gpeastingnorthing, fill = "orange"), alpha = .5)
-
-prior_data %>% 
-  ggplot() +
-  geom_line(data = prior_data, aes(x = lscale, y = density, fill = "blue"), alpha = .5)
-
-#########lscale with uniform, no less than 20 or larger than 100###############
-# Set the range for the uniform distribution
-min_val <- 20
-max_val <- 100
-
-# Create a tibble for the x values and corresponding density
-uniform_data <- tibble(
-  x = seq(min_val, max_val, length.out = 1000),
-  density = dunif(x, min = min_val, max = max_val)
-)
-
-# Plot using ggplot
-ggplot(uniform_data, aes(x = x, y = density)) +
-  geom_line(color = "blue", size = 1) +
-  labs(
-    title = "Uniform Distribution",
-    x = "x",
-    y = "Density"
-  ) +
-  theme_minimal()
-rm(min_val, max_val, uniform_data)
-
-fit.gp.uni <- brm(log_hg ~ 
-                scaled_length*SPEC + 
-                SPEC + 
-                scaled_logit_wetlands + 
-                scaled_logit_urban +
-                scaled_logit_ag + 
-                scaled_log_WS_Lake_Ratio + 
-                scaled_log_area + 
-                zm_sample +
-                gp(easting, northing, gr = T,  scale = F),
-              prior = set_prior("uniform(20, 100)", lb = 20, ub = 100, class = "lscale"),
-                     data = hg.data,
-                     iter = 10000,
-                     warmup = 500,
-                     chains = 3,
-                     family = gaussian(),
-                     cores = 12)
-#saveRDS(fit.gp.uni, "statewide_hg_gp_uni.rds")
-fit.gp <- readRDS("statewide_hg_gp_uni.rds")
-
-prior_summary(fit.gp)
-summary(fit.gp)
-plot(fit.gp)
-
-
-
-##########fixing lscale???#################
-trial <- brm(log_hg ~ 
+#####fixed lscale at 10############################
+fit.gp.constant <- brm(log_hg ~ 
                 scaled_length*SPEC + 
                 SPEC + 
                 scaled_logit_wetlands + 
@@ -361,15 +244,292 @@ trial <- brm(log_hg ~
                 gp(easting, northing, gr = T,  scale = F),
               prior = prior(constant(10), class = "lscale", coef = "gpeastingnorthing"),
                      data = hg.data,
-                     iter = 4000,
-                     warmup = 200,
+                     iter = 10000,
+                     warmup = 500,
                      chains = 3,
                      family = gaussian(),
                      cores = 12)
+#saveRDS(fit.gp.constant, "fit.gp.constant.rds")
+fit.gp.constant <- readRDS("fit.gp.constant.rds")
 
-prior_summary(trial)
-summary(trial)
-plot(trial)
+#quick look at the summary
+summary(fit.gp.constant)
+plot(fit.gp.constant)
+
+#############leave out analysis########################## 
+#here is the saved data from the extraction - or you can run the code below
+hg.data.loo <- read_csv("loo_data_constant_lscale.csv")
+################################################################
+
+set.seed(10)
+
+#filtering out spec-lake combinations
+loo_spec_lakes <- hg.data %>% 
+  distinct(SPEC, DOW) %>% 
+  sample_frac(0.15)
+
+hg.data.loo <- hg.data %>% 
+  anti_join(loo_spec_lakes, by = c("SPEC", "DOW"))
+
+#summary of samples that were left out
+hg.data %>% 
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+  summarise(avg_hg = mean(HGPPM),
+            wae = sum(SPEC == "WAE"),
+            nop = sum(SPEC == "NOP"),
+            spec_else = sum(SPEC != "WAE" & SPEC != "NOP"),
+            zm_samples = sum(zm_sample == "y"),
+            n = n())
+
+hg.data %>% 
+  semi_join(loo_spec_lakes, by = c("SPEC", "DOW")) %>% 
+  distinct(DOW, .keep_all = T) %>% 
+  summarise(avg_size = mean(area),
+            avg_wetland = mean(Percent_Wetland),
+            avg_urban = mean(Percent_Urban),
+            zm_lake = sum(zm_sample == "y"),
+            n_lakes = n_distinct(DOW))
+
+#are there any lakes totally removed?
+hg.data %>% 
+  distinct(DOW) %>% 
+  anti_join(hg.data.loo, by = "DOW")
+#this shows that 13 lakes were completely removed 
+
+hg.data %>%
+  distinct(DOW, SPEC) %>%
+  anti_join(hg.data.loo, by = c("SPEC", "DOW")) %>% 
+  semi_join(hg.data.loo, by = "DOW")
+#this shows that there are 447 cases where one spec was removed from a lake at least one species remains
+
+#saving loo data
+#write_csv(hg.data.loo, "loo_data_constant_lscale.csv")
+
+#modeling
+fit.gp.loo <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, gr = T,  scale = F),
+              prior = prior(constant(10), class = "lscale", coef = "gpeastingnorthing"),
+                     data = hg.data.loo,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+#saveRDS(fit.gp.loo, "statewide_gp_constant_loo.rds")
+fit.gp.loo <- readRDS("statewide_gp_constant_loo.rds")
+
+#basic summary of model output
+summary(fit.gp.loo)
+plot(fit.gp.loo)
+
+###############predictive checks######################### 
+#left out data
+hg.data.loo <- read_csv("loo_data_constant_lscale.csv") %>% 
+  select(SPEC, YEARCOLL, DOW, HGPPM, LGTHIN)
+
+loo.data <- hg.data %>% 
+  anti_join(hg.data.loo)
+
+# build predictions from the left out data - read in saved data to save time
+# predictions <- loo.data %>% 
+#   add_predicted_draws(fit.gp.loo, ndraws = 100)
+# write_csv(predictions, "predictions_loo_constant_lscale.csv")
+predictions <- read_csv("predictions_loo_constant_lscale.csv")
+
+#summary of the draws for each prediction
+predictions_summary <- predictions %>% 
+  median_qi() 
+
+#find the sd of the draws for each prediction
+predictive_sd <- predictions %>% 
+  group_by(.row) %>% 
+  summarise(.pred_sd = sd(.prediction),
+            median = median(.prediction))
+
+predictions_summary <- predictions_summary %>% 
+  left_join(predictive_sd)
+rm(predictive_sd)
+
+#making grouping variable for lakes with complete leave out
+loo_lakes <- hg.data %>% 
+  distinct(DOW) %>% 
+  anti_join(hg.data.loo, by = "DOW")
+
+predictions_summary <- predictions_summary %>% 
+  mutate(lake_loo = case_when(DOW %in% loo_lakes$DOW ~ "y",
+                              TRUE ~ "n"))
+rm(loo_lakes)
+
+#plots that show how well we predicted our result 
+predictions_summary %>% 
+  ggplot() +
+  geom_point(aes(log_hg, .prediction, color = lake_loo)) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  scale_color_manual(values = c("black", "red")) +
+  theme_minimal()
+
+error_metrics <- predictions_summary %>%
+  mutate(
+    error = abs(log_hg - .prediction),
+    squared_error = (log_hg - .prediction)^2,
+    within_interval = ifelse(log_hg >= .lower & log_hg <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  group_by(lake_loo) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd)
+  )
+error_metrics
+
+#back transformed metrics
+predictions_summary_original <- predictions %>%
+  mutate(.prediction = exp(.prediction)) %>% 
+  median_qi() 
+
+predictive_sd_original <- predictions %>% 
+  mutate(.prediction = exp(.prediction)) %>%
+  group_by(.row) %>% 
+  summarise(.pred_sd = sd(.prediction),
+            median = median(.prediction))
+
+predictions_summary_original <- predictions_summary_original %>% 
+  left_join(predictive_sd_original)
+rm(predictive_sd_original)
+
+loo_lakes <- hg.data %>% 
+  distinct(DOW) %>% 
+  anti_join(hg.data.loo, by = "DOW")
+
+predictions_summary_original <- predictions_summary_original %>% 
+  mutate(lake_loo = case_when(DOW %in% loo_lakes$DOW ~ "y",
+                              TRUE ~ "n"))
+rm(loo_lakes)
+
+error_metrics_backtransformed <- predictions_summary_original %>%
+  mutate(
+    error_original = abs(HGPPM - .prediction),
+    squared_error_original = (HGPPM - .prediction)^2,
+    within_interval_original = ifelse(HGPPM >= .lower & HGPPM <= .upper, 1, 0),
+    interval_width_original = .upper - .lower,
+  ) %>%
+  group_by(lake_loo) %>% 
+  summarise(
+    MAE_original = mean(error_original, na.rm = TRUE),
+    RMSE_original = sqrt(mean(squared_error_original, na.rm = TRUE)),
+    coverage_original = mean(within_interval_original, na.rm = TRUE),
+    avg_interval_width_original = mean(interval_width_original, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd)
+  )
+error_metrics_backtransformed
+
+#plot
+#y-axis log transformed for display
+predictions_summary_original %>%
+  group_by(SPEC) %>% 
+  arrange(HGPPM) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = log(.lower), ymax = log(.upper)), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = log(.prediction)), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = log(.prediction)), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_wrap(~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+ggsave("loo_prediction_original.png", dpi = 600, width = 11, height = 7, bg = "white")
+
+predictions_summary_original %>%
+  group_by(SPEC) %>% 
+  arrange(.prediction) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = log(.lower), ymax = log(.upper)), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = log(.prediction)), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = log(HGPPM)), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_grid(lake_loo~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+#####comparing left out species####
+#generate a list of species that remained in a lake while at least one was removed
+# Identify species removed
+removed_species <- hg.data %>%
+  distinct(DOW, SPEC) %>%
+  anti_join(hg.data.loo, by = c("SPEC", "DOW"))
+
+# Identify species kept
+kept_species <- hg.data.loo %>%
+  distinct(DOW, SPEC)
+
+# Merge to see which species were removed and which were kept in the same lake
+species_changes <- removed_species %>%
+  semi_join(kept_species, by = "DOW") %>%
+  full_join(kept_species, by = "DOW", suffix = c("_removed", "_kept")) %>%
+  group_by(DOW) %>%
+  summarise(
+    removed_species = list(unique(SPEC_removed[!is.na(SPEC_removed)])),
+    kept_species = list(unique(SPEC_kept[!is.na(SPEC_kept)]))
+  ) %>%
+  mutate(
+    removed_species = sapply(removed_species, function(x) ifelse(length(x) == 0, NA, paste(x, collapse = ", "))),
+    kept_species = sapply(kept_species, function(x) ifelse(length(x) == 0, NA, paste(x, collapse = ", ")))
+  )
+species_changes
+rm(removed_species, kept_species)
+
+species_changes_remain <- species_changes %>% 
+  filter(!is.na(kept_species), !is.na(removed_species))
+
+sort_species <- function(species) {
+  species %>% 
+    str_split(", ") %>% 
+    map_chr(~ paste(sort(.x), collapse = ", "))
+}
+
+# Apply function to standardize species pairs
+species_changes_remain <- species_changes_remain %>%
+  mutate(kept_species = sort_species(kept_species),
+         removed_species = sort_species(removed_species)) %>% 
+  mutate(pred_fish_removed_no_remain = case_when(removed_species %in% c("WAE", "NOP") ~ "y"))
+
+species_changes_remain %>% 
+  group_by(kept_species) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  print(n = nrow(.))
+
+species_changes_remain %>% 
+  group_by(removed_species) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  print(n = nrow(.))
+rm(sort_species)
+
+
+###############random effects loo########################################
 ```
 
 
@@ -3822,4 +3982,121 @@ test <- brm(log_hg ~
                      cores = 12)
 prior_summary(test)
 summary(test)
+
+#############lscale prior inverse gamma with 1% prob below 20 or above 600#####
+fit.gp <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, gr = T,  scale = F),
+              prior = prior(inv_gamma(3, 664), class = "lscale", coef = "gpeastingnorthing"),
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+
+#saveRDS(fit.gp, "statewide_gp_lscale_prior.rds")
+fit.gp <- readRDS("statewide_gp_lscale_prior.rds")
+
+summary(fit.gp)
+plot(fit.gp)
+
+#inspect the prior
+prior_summary(fit.gp)
+get_variables(fit.gp)
+
+post_lscale <- fit.gp %>% 
+  spread_draws(lscale_gpeastingnorthing)
+
+# Define the parameters for the prior
+inv_gamma_density <- function(x, shape, scale) {
+  ifelse(x > 0, (scale^shape) * exp(-scale / x) / (gamma(shape) * x^(shape + 1)), 0)
+}
+
+shape <- 3
+scale <- 664
+
+# Create a sequence of values for lscale
+x_values <- seq(0.01, 600, length.out = 1000) # Avoid 0 since lscale > 0
+
+# Compute the density
+y_values <- inv_gamma_density(x_values, shape, scale)
+
+# Create a data frame for plotting
+prior_data <- data.frame(lscale = x_values, density = y_values)
+
+# Plot the prior
+ggplot(prior_data, aes(x = lscale, y = density)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Default Prior for lscale",
+    x = "lscale (length scale)",
+    y = "Density"
+  ) +
+  geom_vline(xintercept = c(20, 600), color = "red")+
+  theme_minimal()
+
+#compare the plot
+post_lscale %>% 
+  ggplot() +
+  geom_density(aes(lscale_gpeastingnorthing, fill = "orange"), alpha = .5)
+
+prior_data %>% 
+  ggplot() +
+  geom_line(data = prior_data, aes(x = lscale, y = density, fill = "blue"), alpha = .5)
+
+#########lscale with uniform, no less than 20 or larger than 100###############
+# Set the range for the uniform distribution
+min_val <- 20
+max_val <- 100
+
+# Create a tibble for the x values and corresponding density
+uniform_data <- tibble(
+  x = seq(min_val, max_val, length.out = 1000),
+  density = dunif(x, min = min_val, max = max_val)
+)
+
+# Plot using ggplot
+ggplot(uniform_data, aes(x = x, y = density)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Uniform Distribution",
+    x = "x",
+    y = "Density"
+  ) +
+  theme_minimal()
+rm(min_val, max_val, uniform_data)
+
+fit.gp.uni <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                gp(easting, northing, gr = T,  scale = F),
+              prior = set_prior("uniform(20, 100)", lb = 20, ub = 100, class = "lscale"),
+                     data = hg.data,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian(),
+                     cores = 12)
+#saveRDS(fit.gp.uni, "statewide_hg_gp_uni.rds")
+fit.gp <- readRDS("statewide_hg_gp_uni.rds")
+
+prior_summary(fit.gp)
+summary(fit.gp)
+plot(fit.gp)
 ```
+
+
