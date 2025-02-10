@@ -292,15 +292,17 @@ hg.data %>%
 
 #are there any lakes totally removed?
 hg.data %>% 
-  distinct(DOW) %>% 
+  distinct(DOW, SPEC) %>% 
   anti_join(hg.data.loo, by = "DOW")
 #this shows that 13 lakes were completely removed 
+#17000300 had two species removed 
 
 hg.data %>%
   distinct(DOW, SPEC) %>%
   anti_join(hg.data.loo, by = c("SPEC", "DOW")) %>% 
-  semi_join(hg.data.loo, by = "DOW")
-#this shows that there are 447 cases where one spec was removed from a lake at least one species remains
+  semi_join(hg.data.loo, by = "DOW") 
+#this shows that there are 457 cases where one spec was removed from a lake at least one species remains
+
 
 #saving loo data
 #write_csv(hg.data.loo, "loo_data_constant_lscale.csv")
@@ -513,7 +515,18 @@ sort_species <- function(species) {
 species_changes_remain <- species_changes_remain %>%
   mutate(kept_species = sort_species(kept_species),
          removed_species = sort_species(removed_species)) %>% 
-  mutate(pred_fish_removed_no_remain = case_when(removed_species %in% c("WAE", "NOP") ~ "y"))
+  mutate(pred_fish_removed_no_remain = case_when((str_detect(removed_species, "NOP") |
+                                                   str_detect(removed_species, "WAE")) &
+                                                   !(str_detect(kept_species, "NOP") |
+                                                   str_detect(kept_species, "WAE")) ~ "y",
+                                                 TRUE ~ "n"),
+         pred_fish_removed_one_remains = case_when((str_detect(removed_species, "NOP") |
+                                                   str_detect(removed_species, "WAE")) &
+                                                   (str_detect(kept_species, "NOP") |
+                                                   str_detect(kept_species, "WAE")) ~ "y",
+                                                 TRUE ~ "n"),
+         )
+rm(sort_species)
 
 species_changes_remain %>% 
   group_by(kept_species) %>% 
@@ -526,7 +539,11 @@ species_changes_remain %>%
   count() %>% 
   arrange(desc(n)) %>% 
   print(n = nrow(.))
-rm(sort_species)
+
+species_changes_remain %>% 
+  summarise(n_pred_removed_no_remain = sum(pred_fish_removed_no_remain == "y"),
+            n_pred_removed_one_remains = sum(pred_fish_removed_one_remains == "y"),
+            total = n())
 
 
 ###############random effects loo########################################
