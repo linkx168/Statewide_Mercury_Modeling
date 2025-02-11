@@ -547,6 +547,167 @@ species_changes_remain %>%
 
 
 ###############random effects loo########################################
+fit.ran.loo <- brm(log_hg ~ 
+                scaled_length*SPEC + 
+                SPEC + 
+                scaled_logit_wetlands + 
+                scaled_logit_urban +
+                scaled_logit_ag + 
+                scaled_log_WS_Lake_Ratio + 
+                scaled_log_area + 
+                zm_sample +
+                (1|DOW),
+                     data = hg.data.loo,
+                     iter = 10000,
+                     warmup = 500,
+                     chains = 3,
+                     family = gaussian())
+#saveRDS(fit.ran.loo, "statewide_random_loo.rds")
+fit.ran.loo <- readRDS("statewide_random_loo.rds")
+
+summary(fit.ran.loo)
+
+###############predictive checks######################### 
+#left out data
+hg.data.loo <- read_csv("loo_data_constant_lscale.csv") %>% 
+  select(SPEC, YEARCOLL, DOW, HGPPM, LGTHIN)
+
+loo.data <- hg.data %>% 
+  anti_join(hg.data.loo)
+
+# build predictions from the left out data - read in saved data to save time
+ predictions <- loo.data %>% 
+  add_predicted_draws(fit.ran.loo, ndraws = 100, allow_new_levels = T)
+#write_csv(predictions, "predictions_loo_rand.csv")
+predictions <- read_csv("predictions_loo_rand.csv")
+
+#summary of the draws for each prediction
+predictions_summary <- predictions %>% 
+  group_by(DOW, HGPPM, LGTHIN, SPEC, .row) %>%
+  summarise(.pred_sd = sd(.prediction),
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction))
+
+predictions_summary <- loo.data %>% 
+  #this is nessary due to there being some duplicate spec-length-hgppm-year-lake
+  distinct(DOW, SPEC, HGPPM, LGTHIN, SPEC, .keep_all = T) %>% 
+  left_join(predictions_summary, by = c("DOW", "HGPPM", "LGTHIN", "SPEC"))
+
+#making grouping variable for lakes with complete leave out
+loo_lakes <- hg.data %>% 
+  distinct(DOW) %>% 
+  anti_join(hg.data.loo, by = "DOW")
+
+predictions_summary <- predictions_summary %>% 
+  mutate(lake_loo = case_when(DOW %in% loo_lakes$DOW ~ "y",
+                              TRUE ~ "n"))
+rm(loo_lakes)
+
+#plots that show how well we predicted our result 
+predictions_summary %>% 
+  ggplot() +
+  geom_point(aes(log_hg, .prediction, color = lake_loo)) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  scale_color_manual(values = c("black", "red")) +
+  theme_minimal()
+
+error_metrics <- predictions_summary %>%
+  mutate(
+    error = abs(log_hg - .prediction),
+    squared_error = (log_hg - .prediction)^2,
+    within_interval = ifelse(log_hg >= .lower & log_hg <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  group_by(lake_loo) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd)
+  )
+error_metrics
+
+#back transformed metrics
+predictions_summary_original <- predictions %>% 
+  mutate(.prediction = exp(.prediction)) %>% 
+  group_by(DOW, HGPPM, LGTHIN, SPEC, .row) %>%
+  summarise(.pred_sd = sd(.prediction),
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction))
+
+predictions_summary_original <- loo.data %>% 
+  #this is nessary due to there being some duplicate spec-length-hgppm-year-lake
+  distinct(DOW, SPEC, HGPPM, LGTHIN, SPEC, .keep_all = T) %>% 
+  left_join(predictions_summary, by = c("DOW", "HGPPM", "LGTHIN", "SPEC"))
+
+
+loo_lakes <- hg.data %>% 
+  distinct(DOW) %>% 
+  anti_join(hg.data.loo, by = "DOW")
+
+predictions_summary_original <- predictions_summary_original %>% 
+  mutate(lake_loo = case_when(DOW %in% loo_lakes$DOW ~ "y",
+                              TRUE ~ "n"))
+rm(loo_lakes)
+
+error_metrics_backtransformed <- predictions_summary_original %>%
+  mutate(
+    error_original = abs(HGPPM - .prediction),
+    squared_error_original = (HGPPM - .prediction)^2,
+    within_interval_original = ifelse(HGPPM >= .lower & HGPPM <= .upper, 1, 0),
+    interval_width_original = .upper - .lower,
+  ) %>%
+  group_by(lake_loo) %>% 
+  summarise(
+    MAE_original = mean(error_original, na.rm = TRUE),
+    RMSE_original = sqrt(mean(squared_error_original, na.rm = TRUE)),
+    coverage_original = mean(within_interval_original, na.rm = TRUE),
+    avg_interval_width_original = mean(interval_width_original, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd)
+  )
+error_metrics_backtransformed
+
+#plot
+#y-axis log transformed for display
+predictions_summary_original %>%
+  group_by(SPEC) %>% 
+  arrange(HGPPM) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = log(.lower), ymax = log(.upper)), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = log(.prediction)), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = log(.prediction)), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_wrap(~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+ggsave("loo_prediction_original.png", dpi = 600, width = 11, height = 7, bg = "white")
+
+predictions_summary_original %>%
+  group_by(SPEC) %>% 
+  arrange(.prediction) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = log(.lower), ymax = log(.upper)), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = log(.prediction)), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = log(HGPPM)), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_grid(lake_loo~SPEC, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
 ```
 
 
