@@ -2143,6 +2143,9 @@ ggsave("rand_year_effect.jpg", combined_rand_eff_year, height = 5, width = 7, dp
 rm(ranef_year_wae_raw, ranef_year_nop_raw, ranef_year_wae, ranef_year_nop, walleye_outline, pike_outline, combined_rand_eff_year)
 ```
 
+
+###########################################################################
+
 # PUlling Leech Lake Random Effects
 ```{r}
 #11014700 - winni
@@ -2153,25 +2156,31 @@ rm(ranef_year_wae_raw, ranef_year_nop_raw, ranef_year_wae, ranef_year_nop, walle
 combined_data %>%
   filter(dow %in% c("11014700", "04003000", "11020300")) %>% 
   mutate(spec = case_when(spec == "WAE" ~ "Walleye",
-                          spec == "NOP" ~ "Nothern Pike")) %>% 
+                          spec == "NOP" ~ "Northern Pike"),
+         waterway = case_when(waterway == "WINNIBIGOSHISH" ~ "WINNI",
+                              TRUE ~ waterway)) %>% 
   ggplot() +
   geom_point(aes(lgthmm, hgppm, color = zm_sample_lag_2)) +
   geom_smooth(aes(lgthmm, hgppm, color = zm_sample_lag_2), se = F, method = "lm", formula = y ~ poly(x, 2)) +
   geom_hline(yintercept = 0.22, linetype = "dashed") +
+  # geom_vline(data = tibble(spec = c("Walleye", "Northern Pike"), lgthmm = c(381, 600)), 
+  #            aes(xintercept = lgthmm), linetype = "dotted", color = "black") +
   scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Pre-Invasion", "Zebra Mussel")) +
-  facet_grid(spec ~ waterway) +
+  labs(y = "Mercury Concentration (ppm)",
+       x = "Length of Fish (mm)") +
+  facet_grid(waterway ~ spec, scales = "free") +
   theme_minimal() +
-  theme(legend.position = "bottom") 
+  theme(legend.position = "bottom")
 ggsave("raw_data_poly_fit.jpg")
 
 #random effects
+length_seq <- seq(min(wae_data$scaled_length), max(wae_data$scaled_length), length.out = 25) 
+
 pred_data <- wae_data %>% 
   filter(dow %in% c("11014700", "04003000", "11020300")) %>%
-  select(dow, 
-         scaled_length,
-         zm_lake,
-         zm_sample_lag_2,
-         yearcoll)
+  select(dow, zm_lake, zm_sample_lag_2, yearcoll) %>%
+  distinct() %>%
+  expand_grid(scaled_length = length_seq)
 
 predition_data_wae <- pred_data %>% 
   add_epred_draws(fit_wae) %>% 
@@ -2187,13 +2196,14 @@ predition_data_wae %>%
   theme(legend.position = "bottom") 
 
 #pike
+length_seq <- seq(min(nop_data$scaled_length), max(nop_data$scaled_length), length.out = 25) 
+
 pred_data <- nop_data %>% 
   filter(dow %in% c("11014700", "04003000", "11020300")) %>%
-  select(dow, 
-         scaled_length,
-         zm_lake,
-         zm_sample_lag_2,
-         yearcoll)
+  select(dow, zm_lake, zm_sample_lag_2, yearcoll) %>%
+  distinct() %>%
+  expand_grid(scaled_length = length_seq)
+
 
 predition_data_nop <- pred_data %>% 
   add_epred_draws(fit_nop) %>% 
@@ -2209,23 +2219,39 @@ predition_data_nop %>%
   theme(legend.position = "bottom") 
 
 #combined
+length_stats <- combined_data %>% 
+  group_by(spec) %>% 
+  summarise(mean_length = mean(lgthmm),
+            sd_length = sd(lgthmm)) %>% 
+  mutate(spec = case_when(spec == "NOP" ~ "Northern Pike",
+                          spec == "WAE" ~  "Walleye",
+                          TRUE ~ NA))
+  
+
 pred_nop_wae <- bind_rows(predition_data_nop %>% 
                             mutate(spec = "Northern Pike"), 
                           predition_data_wae %>% 
                             mutate(spec = "Walleye"))  %>% 
   mutate(waterway = case_when(dow == "11020300" ~ "LEECH",
                                dow == "04003000" ~ "CASS",
-                               dow == "11014700" ~ "WINNIBIGOSHISH"))
+                               dow == "11014700" ~ "WINNIBIGOSHISH")) %>% 
+  left_join(length_stats) %>% 
+  mutate(lgthmm = scaled_length*sd_length + mean_length)
 
 #update this plot with the actual raw data in the background 
 #for this plot, the modeled lines can be constructed of more than just the observed lengths 
-pred_nop_wae %>% 
-  ggplot() +
-  geom_point(aes(scaled_length, lake.median, color = zm_sample_lag_2)) +
-  geom_smooth(aes(scaled_length, lake.median, color = zm_sample_lag_2), se = F) +
+ggplot() +
+  geom_point(data = combined_data %>% 
+                mutate(spec = case_when(spec == "NOP" ~ "Northern Pike",
+                          spec == "WAE" ~  "Walleye",
+                          TRUE ~ NA)) %>% 
+               filter(dow %in% c(pred_nop_wae$dow)), aes(lgthmm, hgppm, color = zm_sample_lag_2)) +
+  geom_smooth(data = pred_nop_wae, aes(lgthmm, lake.median, color = zm_sample_lag_2), se = F) +
   geom_hline(yintercept = 0.22, linetype = "dashed") +
   scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Pre-Invasion", "Zebra Mussel")) +
-  facet_grid(spec~waterway) +
+  labs(x = "Length of Fish (mm)",
+       y = "Mercury Concentration (ppm)") +
+  facet_grid(waterway ~spec, scales = "free") +
   theme_minimal() +
   theme(legend.position = "bottom") 
 ggsave("modeled_random_effects.jpg")
