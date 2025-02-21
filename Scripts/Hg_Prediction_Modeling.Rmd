@@ -641,7 +641,7 @@ predictions_summary_original <- predictions %>%
 predictions_summary_original <- loo.data %>% 
   #this is nessary due to there being some duplicate spec-length-hgppm-year-lake
   distinct(DOW, SPEC, HGPPM, LGTHIN, SPEC, .keep_all = T) %>% 
-  left_join(predictions_summary, by = c("DOW", "HGPPM", "LGTHIN", "SPEC"))
+  left_join(predictions_summary_original, by = c("DOW", "HGPPM", "LGTHIN", "SPEC"))
 
 
 loo_lakes <- hg.data %>% 
