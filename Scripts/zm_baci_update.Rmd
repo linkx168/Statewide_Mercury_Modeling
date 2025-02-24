@@ -322,9 +322,10 @@ rm(normal_lakes)
 
 ```
 
+
 #BACI filter function
-1. We filter out fish below 5" and cut LOD samples in half
-2. Filter function - this filter function takes 1.) the species of interest, 2.) the data and 3.) the lag year variable (y/n) and returns a dataset that has lakes with a least one year of data pre and one year of data post. ZM invasion year is determined the the lag year variable pre filtering and the reference invasion lakes are determined by the closest invaded lake within the analysis
+1. We filter out fish below 5" and multiply LOD samples by 0.5
+2. Filter function - this filter function takes 1.) the species of interest, 2.) the data and 3.) the lag year variable (y/n) and returns a dataset that has lakes with a least one year of data pre and one year of data post. ZM invasion year is determined by the lag year variable pre filtering and the reference invasion lakes are determined by the closest invaded lake within the analysis
 3. There is code to get individual calls (providing just one specie and zm_lag_year) AND there is code to loop over every combo of WAE and NOP for 6 year of ZM Y/N
 ```{r}
 #pre lake grouping filtering (removing small fish and dealing with fish @ the LOD)
@@ -333,10 +334,6 @@ hg.model <- hg.model %>%
   mutate(hgppm = case_when(hgcode == "K" ~ hgppm/2,
                            TRUE ~ hgppm))
 
-hg.model %>% 
-  group_by(spec) %>% 
-  count() %>% 
-  arrange(desc(n))
 
 create_species_data <- function(species, data, lag_variable) {
   # Filter zebra mussel lakes
@@ -366,8 +363,9 @@ create_species_data <- function(species, data, lag_variable) {
   ref_lakes <- ref_lakes %>% 
     mutate(nearest_zm_lake = st_nearest_feature(geometry, zm_lakes$geometry),
            nearest_infested_year = zm_lakes$year_infested[nearest_zm_lake],
-           !!sym(lag_variable) := case_when(yearcoll >= (nearest_infested_year +2)  ~ "y",
-                                       yearcoll <= (nearest_infested_year +2) ~ "n")) %>% 
+           dynamic_lag = parse_number(str_extract(lag_variable, "\\d+$")),
+           !!sym(lag_variable) := case_when(yearcoll >= (nearest_infested_year + dynamic_lag)  ~ "y",
+                                       yearcoll <= (nearest_infested_year + dynamic_lag) ~ "n")) %>% 
     distinct(dow, !!sym(lag_variable)) %>% 
     group_by(dow) %>% 
     count() %>% 
@@ -439,8 +437,10 @@ create_species_data <- function(species, data, lag_variable) {
     filter(dow %in% c(ref_lakes$dow)) %>% 
     mutate(nearest_zm_lake = st_nearest_feature(geometry, zm_lakes$geometry),
            nearest_infested_year = zm_lakes$year_infested[nearest_zm_lake],
-           !!sym(lag_variable) := case_when(yearcoll >= (nearest_infested_year + 2)  ~ "y",
-                                       yearcoll <= (nearest_infested_year + 2) ~ "n"))  
+           dynamic_lag = parse_number(str_extract(lag_variable, "\\d+$")),
+           !!sym(lag_variable) := case_when(yearcoll >= (nearest_infested_year + dynamic_lag)  ~ "y",
+                                       yearcoll <= (nearest_infested_year + dynamic_lag) ~ "n")) %>% 
+    select(-dynamic_lag)
 
   # Combine zebra mussel and reference data
   species_data <- bind_rows(ref_fish, zm_fish) %>% 
@@ -474,6 +474,7 @@ create_species_data <- function(species, data, lag_variable) {
   return(species_data)
 }
 
+
 #example of how to get one species and lag year
 wae_data <- create_species_data(species = "WAE", data = hg.model, lag_variable = "zm_sample_lag_2")
 nop_data <- create_species_data(species = "NOP", data = hg.model, lag_variable = "zm_sample_lag_2")
@@ -481,19 +482,21 @@ blg_data <- create_species_data(species = "BLG", data = hg.model, lag_variable =
 blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable = "zm_sample_lag_2")
 lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
 yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
+wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
 
 #loop over all combos of NOP and WAE zm_sample to zm_sample_lag_year_5
-species <- c("WAE", "NOP")
-lag_variables <- c("zm_sample", paste0("zm_sample_lag_", 1:5))
+species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
+lag_variables <- paste0("zm_sample_lag_", 1:5)
 
-for (species in species) {
+# Loop through all combinations
+for (species in species_list) {
   for (lag_var in lag_variables) {
-    # Create the data for the current combination
+    object_name <- paste0(species, "_", lag_var)  # Construct variable name
     species_data <- create_species_data(species = species, data = hg.model, lag_variable = lag_var)
     
-    # Dynamically assign the object name
-    object_name <- paste0(species, "_", lag_var)
-    assign(object_name, species_data)
+    assign(object_name, species_data, envir = .GlobalEnv)  # Save in global environment
+    
+    print(paste("Created:", object_name))  # Print progress
   }
 }
 ```
@@ -1342,6 +1345,9 @@ rm(pred_lengths, pred_data)
 summary(fit_nop)
 plot(fit_nop)
 pp_check(fit_nop, ndraws = 50)
+
+#priors 
+get_prior(fit_nop)
 
 #this generates contrasts in the log scale 
 contrasts <- contrast(emmeans(fit_nop, ~ zm_lake * zm_sample_lag_2, re_formula = NA, epred = TRUE), 

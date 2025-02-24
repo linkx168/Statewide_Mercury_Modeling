@@ -197,6 +197,57 @@ hg.model <- hg %>%
          time_since_invasion = YEARCOLL - zm_lag_year_infested)
 ```
 
+# Building Leave Out Test 
+```{r}
+#filter data based on basics 
+hg.data <- hg.model %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
+                           TRUE ~ HGPPM)) %>% 
+  #species with more than 1,000 observations 
+  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(YEARCOLL > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(WS_Lake_Ratio < 100) %>% 
+  #linking data to lat/lon
+  mutate(DOW = as.factor(DOW),
+         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
+  #removes lakes where lat/lon was not grabbed - worth checking in later
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  filter(!is.na(clarity)) %>% 
+  #transforming some variables for modeling
+  group_by(SPEC) %>% 
+  mutate(scaled_length = c(scale(LGTHIN))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(HGPPM),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_logit_urban = c(scale(logit_urban)),
+         scaled_logit_ag = c(scale(logit_ag)),
+         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3)) 
+
+#how many lakes do we have?
+hg.data %>% 
+  distinct(DOW)
+
+#how many lakes have wae and nop?
+hg.data %>% 
+  group_by(DOW) %>% 
+  mutate(has_wae_nop = case_when(SPEC == "WAE" ))
+
+
+loo_spec_lakes <- hg.data %>% 
+  distinct(SPEC, DOW) %>% 
+  sample_frac(0.15)
+
+
+```
+
+
 #Models exploring spacial term
 ```{r}
 ####################filtering hg data for predictive modeling##################
@@ -709,7 +760,6 @@ predictions_summary_original %>%
   guides(color = guide_legend("Legend")) +
   theme(legend.position = "top")
 ```
-
 
 #GP with all lakes
 The general structure of this chunk
