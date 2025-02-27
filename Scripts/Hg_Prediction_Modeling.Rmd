@@ -399,17 +399,20 @@ predictions <- read_csv("predictions_loo_constant_lscale.csv")
 
 #summary of the draws for each prediction
 predictions_summary <- predictions %>% 
-  median_qi() 
-
-#find the sd of the draws for each prediction
-predictive_sd <- predictions %>% 
-  group_by(.row) %>% 
+  group_by(DOW, HGPPM, LGTHIN, SPEC, .row) %>%
   summarise(.pred_sd = sd(.prediction),
-            median = median(.prediction))
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction)) 
 
-predictions_summary <- predictions_summary %>% 
-  left_join(predictive_sd)
-rm(predictive_sd)
+
+predictions_summary <- loo.data %>%
+  #this is nessary due to there being some duplicate spec-length-hgppm-year-lake
+  distinct(DOW, SPEC, HGPPM, LGTHIN, SPEC, .keep_all = T) %>%
+  left_join(predictions_summary, by = c("DOW", "HGPPM", "LGTHIN", "SPEC"))
+
+
+
 
 #making grouping variable for lakes with complete leave out
 loo_lakes <- hg.data %>% 
@@ -448,18 +451,17 @@ error_metrics
 
 #back transformed metrics
 predictions_summary_original <- predictions %>%
-  mutate(.prediction = exp(.prediction)) %>% 
-  median_qi() 
-
-predictive_sd_original <- predictions %>% 
   mutate(.prediction = exp(.prediction)) %>%
-  group_by(.row) %>% 
+  group_by(DOW, HGPPM, LGTHIN, SPEC, .row) %>%
   summarise(.pred_sd = sd(.prediction),
-            median = median(.prediction))
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction))
 
-predictions_summary_original <- predictions_summary_original %>% 
-  left_join(predictive_sd_original)
-rm(predictive_sd_original)
+predictions_summary_original <- loo.data %>%
+  #this is nessary due to there being some duplicate spec-length-hgppm-year-lake
+  distinct(DOW, SPEC, HGPPM, LGTHIN,  .keep_all = T) %>%
+  left_join(predictions_summary_original, by = c("DOW", "HGPPM", "LGTHIN", "SPEC"))
 
 loo_lakes <- hg.data %>% 
   distinct(DOW) %>% 
