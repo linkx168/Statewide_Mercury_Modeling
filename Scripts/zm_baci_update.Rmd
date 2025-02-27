@@ -2212,7 +2212,7 @@ species_plots <- species_summary %>%
 
 wrap_plots(species_plots$plot, ncol = 1)
 
-max(species_summary$marg_draw_plot$hg_ppm)
+
 ```
 
 
@@ -2433,6 +2433,12 @@ ggsave("modeled_random_effects.jpg")
 
 # Old code 
 ```{r}
+#quick check 
+combined_species <- bind_rows(nop_data, wae_data)
+combined_species %>% 
+  filter(zm_lake == "n") %>% 
+  count(dow)
+
 #this section of code was initally used to filter for baci data but was replaced with a function
 #############Data for Analysis###############
 #walleye zebra mussel data 
