@@ -319,7 +319,18 @@ hg.model %>%
 
 rm(normal_lakes)
 
+#what do we have for kornois?
+hg.model %>% 
+  filter(dow == "73020002") %>% 
+  group_by(yearcoll, spec) %>% 
+  count()
 
+hg.model %>% 
+  filter(dow == "73020002" & spec == "WAE") %>% 
+  ggplot() +
+  geom_point(aes(lgthin, hgppm, color = as.factor(yearcoll)), size = 3) +
+  geom_smooth(aes(lgthin, hgppm)) +
+  geom_hline(yintercept = 0.22)
 ```
 
 
@@ -870,16 +881,24 @@ fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + 
              iter = 20000,
              warmup = 5000)
 #saveRDS(fit_yep, "baci_update_yep.rds")
+
+fit_wts <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = wts_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_wts, "baci_update_wts.rds")
 ```
 
 saved model runs
 ```{r}
 fit_wae <- readRDS("Output/BACI/baci_update_wae.rds")
 fit_nop <- readRDS("Output/BACI/baci_update_nop.rds")
-fit_blg <- readRDS("baci_update_blg.rds")
-fit_blc <- readRDS("baci_update_blc.rds")
-fit_lmb <- readRDS("baci_update_lmb.rds")
-fit_yep <- readRDS("baci_update_yep.rds")
+fit_blg <- readRDS("Output/BACI/baci_update_blg.rds")
+fit_blc <- readRDS("Output/BACI/baci_update_blc.rds")
+fit_lmb <- readRDS("Output/BACI/baci_update_lmb.rds")
+fit_yep <- readRDS("Output/BACI/baci_update_yep.rds")
+fit_wts <- readRDS("Output/BACI/baci_update_wts.rds")
 
 summary(fit_wae)
 summary(fit_nop)
@@ -887,6 +906,7 @@ summary(fit_blg)
 summary(fit_blc)
 summary(fit_lmb)
 summary(fit_yep)
+summary(fit_wts)
 ```
 
 2. looping over all NOP and WAE combos of zm_lag for sensitivity analysis 
@@ -1926,6 +1946,9 @@ marg_draws <- emmeans(fit_wae, ~ zm_lake * zm_sample_lag_2, re_fromula = NA, epr
 #  gather_emmeans_draws() %>% 
 #  mutate(hg_ppm = exp(.value))
 
+expand_grid(species = c("walleye", "perch", "pike"),
+            )
+
 #average values for zm_lake for before and after 
 marg_draws %>% 
   select(zm_lake, zm_sample_lag_2, hg_ppm) %>% 
@@ -2026,7 +2049,6 @@ rm(contrasts_draws, fit_wae, marg_draws, diff_lakes, diff_of_diff,
    diff_plot_data, median_lines_plot, percent_changes)
 ```
 
-
 #Combining walleye and pike plots
 ```{r}
 #BACI Effect
@@ -2050,6 +2072,149 @@ probs_length
 ggsave(plot = probs_length, "length_probs_wae_nop.jpg", height = 5, width = 7, dpi = 600, bg = "white")
 
 ```
+
+#Figure 2 - with all 7 species 
+```{r}
+#define lengths to be used in the marginal effects
+species_lengths <- tibble(
+  species = c("WAE", "NOP", "BLC", "BLG", "LMB", "WTS", "YEP"),
+  standard_length = c(381, 610, 205, 155, 305, 305, 205) # Adjust as needed
+)
+
+
+#get summary data from model outputs
+species_summary <- species_lengths %>%
+  mutate(summary_data = map2(species, standard_length, function(sp, len) {
+    
+    sp_lower <- tolower(sp)
+    
+    # Filter dataset for species
+    species_data <- hg.model %>% 
+      filter(tolower(spec) == sp_lower) %>% 
+      mutate(lgthmm = lgthin * 25.4)
+    
+    # Calculate species-specific length scaling
+    length_stats <- species_data %>%
+      summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm))
+    
+    specific_length_scaled <- (len - length_stats$mean_length) / length_stats$sd_length
+
+    # Extract marginal effects from the model
+    marg_draws <- emmeans(get(paste0("fit_", sp_lower)), ~ zm_lake * zm_sample_lag_2,
+                          at = list(scaled_length = specific_length_scaled),
+                          re_formula = NA, epred = TRUE) %>%
+      gather_emmeans_draws() %>%
+      mutate(hg_ppm = exp(.value))
+
+    # Transform data for plotting
+    marg_draw_plot <- marg_draws %>%
+      mutate(interaction = paste0(zm_lake, zm_sample_lag_2)) %>%
+      mutate(interaction = case_when(
+        interaction == "nn" ~ "Uninvaded Before",
+        interaction == "ny" ~ "Uninvaded After",
+        interaction == "yn" ~ "Zebra Mussel Before",
+        interaction == "yy" ~ "Zebra Mussel After",
+        TRUE ~ NA
+      ),
+      interaction = factor(interaction, levels = c("Uninvaded Before", "Uninvaded After", "Zebra Mussel Before", "Zebra Mussel After")))
+
+    # Median line summary
+    median_lines_plot <- marg_draw_plot %>%
+      group_by(interaction, zm_lake) %>%
+      summarize(median_hg_ppm = median(hg_ppm), .groups = "drop") %>%
+      mutate(zm_lake = case_when(zm_lake == "n" ~ "Uninvaded",
+                                 zm_lake == "y" ~ "Zebra Mussel"))
+
+    # Compute difference contrasts
+    contrasts_draws <- marg_draws %>% 
+      select(-.chain, -.iteration) %>% 
+      pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+                  values_from = c(.value, hg_ppm))
+
+    diff_of_diff <- contrasts_draws %>% 
+      mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+             diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+      select(.draw, diff_reference, diff_zm) %>% 
+      mutate(value = diff_zm - diff_reference) %>% 
+      select(.draw, value) %>% 
+      mutate(zm_lake = "Difference in Change")
+
+    diff_lakes <- contrasts_draws %>% 
+      mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+             diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+      select(.draw, diff_reference, diff_zm) %>% 
+      pivot_longer(cols = c(diff_reference, diff_zm),
+                   names_to = "zm_lake",
+                   values_to = "value") %>% 
+      mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                                 TRUE ~ "Uninvaded"))
+
+    diff_plot_data <- bind_rows(diff_of_diff, diff_lakes) %>% 
+      mutate(zm_lake = factor(zm_lake, levels = c("Uninvaded", "Zebra Mussel", "Difference in Change")))
+
+    return(list(
+      marg_draw_plot = marg_draw_plot,
+      median_lines_plot = median_lines_plot,
+      diff_plot_data = diff_plot_data
+    ))
+  }))
+
+
+#generate plots
+species_plots <- species_summary %>%
+  mutate(plot = map(summary_data, function(data) {
+    
+    plot1 <- data$marg_draw_plot %>%
+      ggplot(aes(x = interaction, y = hg_ppm, color = interaction, shape = interaction)) +
+      stat_pointinterval(.width = c(.66, .95), show.legend = F)  +
+      scale_shape_manual("Sample Invasion",
+                         values = c(1, 16, 1, 16)) +
+      geom_line(
+        data = data$median_lines_plot,
+        aes(x = interaction, y = median_hg_ppm, group = zm_lake),
+        position = position_dodge(width = 0.1), # Align lines with intervals
+        inherit.aes = FALSE,
+        key_glyph = "rect",
+        color = c("lightblue", "lightblue", "salmon", "salmon")
+      ) +
+      ylab("Mercury Concentration (ppm)") +
+      xlab("") +
+      scale_color_manual("Lake Invasion", 
+                         values = c("lightblue", "lightblue", "salmon", "salmon")) +
+      theme_minimal() +
+      theme(
+        legend.position = "bottom",
+        panel.grid.major.x = element_blank(),
+        #axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 7)
+      )
+
+    plot2 <- data$diff_plot_data %>% 
+      ggplot() +
+      stat_pointinterval(aes(x = zm_lake, y = value, color = zm_lake), .width = c(.66, .95)) +
+      geom_hline(yintercept = 0, linetype = "dashed") +
+      ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+      xlab("") +
+      scale_color_manual(values = c("lightblue", "salmon", "black")) +
+      theme_minimal() +
+      theme(legend.position = "none",
+            panel.grid.major.x = element_blank(),
+            #axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+            axis.text.x = element_blank(),
+            axis.title.y = element_text(size = 8)) +
+      ylim(-0.6, 0.6)
+
+    combined_plot <- ggarrange(plot1, plot2, ncol = 2, nrow = 1, common.legend = T, legend = "none")
+
+    return(combined_plot)
+  }))
+
+wrap_plots(species_plots$plot, ncol = 1)
+
+max(species_summary$marg_draw_plot$hg_ppm)
+```
+
 
 # Exploring Random Effects - dow
 ```{r}
