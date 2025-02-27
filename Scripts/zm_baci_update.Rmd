@@ -167,7 +167,7 @@ hg.model <- hg %>%
          zm_infested_lag_5 = Year_Infested +5,
          zm_lake = case_when(is.na(Year_Infested) ~ "n",
                              TRUE ~ "y"),
-         zm_sample = case_when(Year_Infested <=YEARCOLL ~ "y",
+         zm_sample_lag_0 = case_when(Year_Infested <=YEARCOLL ~ "y",
                                TRUE ~ "n"),
          zm_sample_lag_1 = case_when(zm_infested_lag_1 <= YEARCOLL ~ "y",
                                TRUE ~ "n"),
@@ -370,7 +370,7 @@ create_species_data <- function(species, data, lag_variable) {
     filter(!is.na(centroid_lon)) %>% 
     st_as_sf(coords = c("centroid_lon", "centroid_lat"), crs = 4326)
   
-  #taking the year invaded with 2 years of lag to build reference systems - change as needed for decided lag time
+  #auto change of lag year with number at the end of zm sample lag
   ref_lakes <- ref_lakes %>% 
     mutate(nearest_zm_lake = st_nearest_feature(geometry, zm_lakes$geometry),
            nearest_infested_year = zm_lakes$year_infested[nearest_zm_lake],
@@ -452,6 +452,11 @@ create_species_data <- function(species, data, lag_variable) {
            !!sym(lag_variable) := case_when(yearcoll >= (nearest_infested_year + dynamic_lag)  ~ "y",
                                        yearcoll <= (nearest_infested_year + dynamic_lag) ~ "n")) %>% 
     select(-dynamic_lag)
+  
+  if (nrow(ref_fish) == 0 | nrow(zm_fish) == 0) {
+    message(paste("Skipping:", species, "Lag:", lag_variable, "- No data available"))
+    return(NULL)  # Return NULL to indicate no data
+  }
 
   # Combine zebra mussel and reference data
   species_data <- bind_rows(ref_fish, zm_fish) %>% 
@@ -495,9 +500,10 @@ lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable =
 yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
 wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
 
-#loop over all combos of NOP and WAE zm_sample to zm_sample_lag_year_5
+
+# Define species list and lagged variable names (including non-lagged "zm_sample")
 species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
-lag_variables <- paste0("zm_sample_lag_", 1:5)
+lag_variables <- c(paste0("zm_sample_lag_", 0:5))
 
 # Loop through all combinations
 for (species in species_list) {
@@ -911,13 +917,25 @@ summary(fit_wts)
 
 2. looping over all NOP and WAE combos of zm_lag for sensitivity analysis 
 ```{r}
-species <- c("WAE", "NOP")
-lag_variables <- c("zm_sample", paste0("zm_sample_lag_", 1:5))
+species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
 
-for (species in species) {
+for (species in species_list) {
+  # Adjust lag variables for WTS
+  if (species == "WTS") {
+    lag_variables <- c(paste0("zm_sample_lag_", 0:3))  # Exclude lag_4 and lag_5
+  } else {
+    lag_variables <- c(paste0("zm_sample_lag_", 0:5))
+  }
+
   for (lag_var in lag_variables) {
     # Get the dataset name dynamically
     data_name <- paste0(species, "_", lag_var)
+
+    # Check if the object exists before proceeding
+    if (!exists(data_name)) {
+      next  # Skip to the next iteration if data does not exist
+    }
+
     current_data <- get(data_name) # Get the dataset object dynamically
     
     # Define the formula dynamically
@@ -938,17 +956,26 @@ for (species in species) {
     saveRDS(fit, paste0("baci_update_", tolower(species), "_", lag_var, ".rds"))
   }
 }
+
+# Remove created objects
+rm(list = ls(pattern = "^(WAE|NOP|BLG|BLC|LMB|YEP|WTS)_zm_sample"))
 ```
 
 #saved model runs
 ```{r}
-species <- c("WAE", "NOP")
-lag_variables <- c("zm_sample", paste0("zm_sample_lag_", 1:5))
+species <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
+
 
 # Initialize a list to store models
 model_list <- list()
 
 for (sp in species) {
+  if (sp == "WTS") {
+    lag_variables <- c(paste0("zm_sample_lag_", 0:3))  # Exclude lag_4 and lag_5
+  } else {
+    lag_variables <- c(paste0("zm_sample_lag_", 0:5))
+  }
+  
   for (lag_var in lag_variables) {
     # Construct the file name
     file_name <- paste0("baci_update_", tolower(sp), "_", lag_var, ".rds")
@@ -964,7 +991,7 @@ rm(fit, file_name, lag_var, lag_variables, sp, species)
 ```
 
 # Sensitivity Anlsysis
-Loops over emmeans for each model fit combo of NOP and WAE - creates marginal effects plot of every run for comparing
+Loops over emmeans for each model fit combo of species - creates marginal effects plot of every run for comparing
 ```{r}
 #emmeans for each fit
 marginal_draws_list <- list()
@@ -1051,6 +1078,66 @@ combined_contrasts %>%
           panel.grid.major.x = element_blank(),
           axis.text.x = element_blank())
 ggsave("lag_zm_sensitvity_analysis.jpg", width = 7, height = 5, dpi = 600, background = "white")
+
+#diff of diff plot for all 
+diff_of_diff <- combined_contrasts %>% 
+  mutate(value = diff_zm - diff_reference) %>% 
+  mutate(zm_lake = "Difference in Change")
+
+diff_of_diff %>% 
+  mutate(
+    species = case_when(
+      species == "BLC" ~ "Black Crappie",
+      species == "BLG" ~ "Bluegill",
+      species == "LMB" ~ "Largemouth Bass",
+      species == "NOP" ~ "Northern Pike",
+      species == "WAE" ~ "Walleye",
+      species == "WTS" ~ "White Sucker",
+      species == "YEP" ~ "Yellow Perch",
+      TRUE ~ species
+    ),
+    # Order species so that White Sucker is last
+    species = factor(species, levels = c("Black Crappie", "Bluegill", "Largemouth Bass", 
+                                         "Northern Pike", "Walleye", "Yellow Perch", 
+                                         "White Sucker"))
+  ) %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = lag, y = value, color = lag), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+  xlab("") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    axis.title.y = element_text(size = 8)
+  ) +
+  ylim(-0.4, 0.4) +
+  facet_wrap(~species, ncol = 2)
+ggsave("sensitivity_lag_diff.jpg", dpi = 600, width = 7, height = 11)
+
+diff_of_diff %>% 
+  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
+                             species == "BLG" ~ "Bluegill",
+                             species == "LMB" ~ "Largemouth Bass",
+                             species == "NOP" ~ "Northern Pike",
+                             species == "WAE" ~ "Walleye",
+                             species == "WTS" ~ "White Sucker",
+                             species == "YEP" ~ "Yellow Perch",
+                             TRUE ~ species)) %>% 
+  filter(species != "White Sucker") %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = lag, y = value, color = lag), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+  xlab("") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.title.y = element_text(size = 8)) +
+  facet_wrap(~species)
 ```
 
 ###################all analysis below is based off singular model run##########
