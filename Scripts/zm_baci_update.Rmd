@@ -23,6 +23,7 @@ library(ggpubr)
 library(sf)
 library(tigris)
 library(ggspatial)
+library(gridExtra)
 
 
 #a function from mnsentinel lakes
@@ -532,81 +533,6 @@ for (species in species_list) {
 
 #Elapsed time summaries
 ```{r}
-# #infestation year is independently tracked for invaded and uninvaded lakes
-# wae_data %>% 
-#   group_by( year_infested, nearest_infested_year) %>% 
-#   summarize(n = n()) %>% print(n = nrow(.))
-
-#fix by merging, and add in a post_inv dummy, which bakes in the 2 yr lag. 
-wae_data %>% 
-  mutate(year_infested = ifelse(is.na(year_infested), 
-                                nearest_infested_year, 
-                                year_infested)) %>% 
-  mutate(year_inf_lag2 = year_infested +2) %>% 
-  mutate( post_inv = yearcoll>year_inf_lag2) %>% 
-  # group_by( year_infested) %>% 
-  # summarize(n = n()) %>% print(n = nrow(.))
-  {wae_data <<- .}
-
-# #here we see multiple pre- and multiple post- years. Also see that some lakes have no pre or no post
-# wae_data %>% group_by(waterway, dow, post_inv) %>% 
-#   summarize(nyr = length(unique(yearcoll)))
-
-# wae_data %>% 
-#   group_by(waterway, post_inv, zm_lake) %>% 
-#   summarize(n = n(), .groups = "drop") %>% 
-#   group_by(waterway,zm_lake) %>% 
-#   summarize(
-#     has_T = any(post_inv == TRUE),
-#     has_F = any(post_inv == FALSE),
-#     category = case_when(
-#       has_T & has_F ~ "Both post- and pre-",
-#       has_T ~ "Only post-",
-#       has_F ~ "Only pre-"
-#     )
-#   ) %>% 
-#   group_by(category, zm_lake) %>% 
-#   count(category)
-
-
-#now for each lake, calculate the mean year of the pre- data and the mean year of the post- data
-wae_data %>% 
-  group_by(waterway, dow, post_inv, zm_lake, year_inf_lag2) %>% 
-  summarize(
-    mean_yr = mean(yearcoll), 
-    n_yr = length(unique(yearcoll)), 
-    .groups = "drop"
-  ) %>% 
-  pivot_wider(
-    names_from = post_inv, 
-    values_from = c(mean_yr, n_yr),
-    names_glue = "{.value}_post_inv_{post_inv}"
-  ) %>% 
-  mutate(delta_t = round(mean_yr_post_inv_TRUE - mean_yr_post_inv_FALSE, 2)) %>% 
-  {lake_deltas <<- .}
-
-
-
-# ggplot(lake_deltas, aes(delta_t, group =zm_lake)) + 
-#   geom_density(aes(color = zm_lake))
-# 
-# ggplot(lake_deltas, aes(delta_t, group =zm_lake)) + 
-#   geom_histogram(aes(color = zm_lake), binwidth = 1)+ 
-#   geom_density(aes(color = zm_lake))
-
-# Compute max histogram count for scaling
-max_count <- max(ggplot_build(ggplot(lake_deltas, aes(x = delta_t)) + 
-                                geom_histogram(binwidth = 1))$data[[1]]$count)
-
-ggplot(lake_deltas, aes(x = delta_t, fill = zm_lake)) +
-  geom_histogram(aes(y = ..count..), binwidth = 1, alpha = 0.4, position = "identity") +
-  geom_density(aes(y = ..density.. * 5*max_count, color = zm_lake), alpha = 0.01, size = 1) +
-  scale_y_continuous(
-    name = "Histogram Count",
-    sec.axis = sec_axis(~ . / max_count, name = "Density")
-  ) +
-  labs(x = "Delta T", fill = "ZM Lake", color = "ZM Lake", title = "wae") +
-  theme_minimal()
 
 
 # Define species list
@@ -624,7 +550,7 @@ for (species in species_list) {
   # Step 2: Process infestation year and post_inv flag
   species_data <- species_data %>%
     mutate(year_infested = ifelse(is.na(year_infested), nearest_infested_year, year_infested)) %>%
-    mutate(year_inf_lag2 = year_infested + 2) %>%
+    mutate(year_inf_lag2 = year_infested + 2) %>% # time lag set to 2 years
     mutate(post_inv = yearcoll > year_inf_lag2)
   
   # Step 3: Calculate pre/post mean year values
@@ -646,25 +572,28 @@ for (species in species_list) {
   max_count <- max(ggplot_build(ggplot(lake_deltas, aes(x = delta_t)) + 
                                   geom_histogram(binwidth = 1))$data[[1]]$count, na.rm = TRUE)
   
-  # Step 5: Create plot
+  # Step 5: Create the plot
   p <- ggplot(lake_deltas, aes(x = delta_t, fill = zm_lake)) +
-    geom_histogram(aes(y = ..count..), binwidth = 1, alpha = 0.4, position = "identity") +
-    geom_density(aes(y = ..density.. * 5 * max_count, color = zm_lake), alpha = 0.01, size = 1) +
+    geom_histogram(aes(y = ..count..), binwidth = 1, alpha = 0.4, position = "identity", show.legend = FALSE) +
+    geom_density(aes(y = ..density.. * 10* max_count, color = zm_lake), alpha = 0.01, size = 1, show.legend = species == "WTS") +  # Only show legend for the first plot
     scale_y_continuous(
       name = "Histogram Count",
-      sec.axis = sec_axis(~ . / max_count, name = "Density")
+      sec.axis = sec_axis(~ . / max_count, name = "Density x10")
     ) +
     labs(x = "Delta T", fill = "ZM Lake", color = "ZM Lake", title = species) +
-    theme_minimal()
+    theme_minimal() +
+    theme(legend.position = ifelse(species == "WTS", "right", "none"))  # Only show legend for the first plot
   
   # Store the plot in a list
   plots[[species]] <- p
   
-  # Print plot (optional, only if running interactively)
-  print(p)
+
 }
 
+# Now `plots` contains a separate ggplot object for each species
 
+# Arrange the plots in a 2-column, 3-row grid (adjusted for 6 species)
+grid.arrange(grobs = plots, ncol = 2, nrow = 4)
 
 
 
