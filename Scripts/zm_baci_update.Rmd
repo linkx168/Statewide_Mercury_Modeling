@@ -655,6 +655,8 @@ for (species in species_list) {
       sec.axis = sec_axis(~ . / max_count, name = "Density")
     ) +
     labs(x = "Delta T", fill = "ZM Lake", color = "ZM Lake", title = species) +
+    scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+    scale_fill_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
     theme_minimal()
   
   # Store the plot in a list
@@ -665,18 +667,85 @@ for (species in species_list) {
 }
 
 
+#########per year marginal effect - lets just start with walleye###########
+fit_wae <- readRDS("Output/BACI/baci_update_wae.rds")
+
+group_deltas <- wae_data %>% 
+  group_by(zm_lake, post_inv) %>% 
+  summarize(
+    mean_yr = mean(yearcoll), 
+    n_yr = length(unique(yearcoll)), 
+    .groups = "drop"
+  ) %>% 
+  pivot_wider(
+    names_from = post_inv, 
+    values_from = c(mean_yr, n_yr),
+    names_glue = "{.value}_post_inv_{post_inv}"
+  ) %>% 
+  mutate(delta_t = round(mean_yr_post_inv_TRUE - mean_yr_post_inv_FALSE, 2)) %>% 
+  mutate(zm_lake = case_when(zm_lake == "n" ~ "Uninvaded",
+                             zm_lake == "y" ~ "Zebra Mussel"))
 
 
+#marginal effects based on specific length
+length_stats <-  wae_data %>% 
+  summarise(mean_length = mean(lgthmm),
+            sd_length = sd(lgthmm))
+specific_length_scaled <- (381 - length_stats$mean_length) / length_stats$sd_length
+
+marg_draws <- emmeans(fit_wae, ~ zm_lake * zm_sample_lag_2, 
+                      at = list(scaled_length = specific_length_scaled), 
+                      re_fromula = NA, 
+                      epred = T) %>% 
+  gather_emmeans_draws() %>% 
+  mutate(hg_ppm = exp(.value))
 
 
+#creating differences
+contrasts_draws <- marg_draws %>% 
+  select(-.chain, -.iteration) %>% 
+  pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+              values_from = c(.value, hg_ppm))
+
+diff_lakes <- contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  pivot_longer(cols = c(diff_reference, diff_zm),
+               names_to = "zm_lake",
+               values_to = "value") %>% 
+  mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                             TRUE ~ "Uninvaded"))
 
 
+diff_lakes <- diff_lakes %>% 
+  left_join(group_deltas, by = "zm_lake") %>% 
+  mutate(value_per_year = value/delta_t)
+
+diff_of_diff <- diff_lakes %>% 
+  pivot_wider(names_from = zm_lake,
+              id_cols = .draw,
+              values_from = c("value", "value_per_year")) %>% 
+  mutate(diff = `value_Zebra Mussel` - value_Uninvaded,
+         diff_delta = `value_per_year_Zebra Mussel` - value_per_year_Uninvaded) %>% 
+  select(.draw, diff, diff_delta) %>% 
+  pivot_longer(cols = c(diff, diff_delta),
+               names_to = "type",
+               values_to = "values")
 
 
-
-
-
-
+diff_of_diff %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = type, y = values, color = type), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+  xlab("") +
+  scale_color_manual(values = c("lightblue", "salmon", "black")) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        #axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.title.y = element_text(size = 8)) 
 ```
 
 
