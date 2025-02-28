@@ -2168,6 +2168,13 @@ species_lengths <- tibble(
   standard_length = c(381, 610, 205, 155, 305, 305, 205) # Adjust as needed
 )
 
+species_datasets <- list(wae = wae_data,
+                         blc = blc_data,
+                         blg = blg_data,
+                         nop = nop_data,
+                         yep = yep_data,
+                         wts = wts_data,
+                         lmb = lmb_data)
 
 #get summary data from model outputs
 species_summary <- species_lengths %>%
@@ -2192,7 +2199,7 @@ species_summary <- species_lengths %>%
                           re_formula = NA, epred = TRUE) %>%
       gather_emmeans_draws() %>%
       mutate(hg_ppm = exp(.value))
-
+    
     # Transform data for plotting
     marg_draw_plot <- marg_draws %>%
       mutate(interaction = paste0(zm_lake, zm_sample_lag_2)) %>%
@@ -2299,7 +2306,78 @@ species_plots <- species_summary %>%
 
 wrap_plots(species_plots$plot, ncol = 1)
 
+#plot with just the differences 
+all_diff <- species_summary %>%
+  transmute(diff_plot_data = map2(species, summary_data, ~ mutate(.y$diff_plot_data, species = .x))) %>%
+  unnest(diff_plot_data)
 
+all_diff %>% 
+  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
+                             species == "BLG" ~ "Bluegill",
+                             species == "LMB" ~ "Largemouth Bass",
+                             species == "NOP" ~ "Northern Pike",
+                             species == "WAE" ~ "Walleye",
+                             species == "WTS" ~ "White Sucker",
+                             species == "YEP" ~ "Yellow Perch",
+                             TRUE ~ species),
+         species = factor(species, levels = c( "Northern Pike", 
+                                               "Walleye",
+                                               "Black Crappie", 
+                                               "Largemouth Bass", 
+                                               "Yellow Perch",
+                                               "Bluegill",
+                                               "White Sucker"))) %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = species, y = value, color = species ), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+  xlab("") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(#angle = 0, 
+                                   #hjust = 1, 
+                                   size = 10),
+        axis.title.y = element_text(size = 8))
+
+species_order <- all_diff %>%
+  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
+                             species == "BLG" ~ "Bluegill",
+                             species == "LMB" ~ "Largemouth Bass",
+                             species == "NOP" ~ "Northern Pike",
+                             species == "WAE" ~ "Walleye",
+                             species == "WTS" ~ "White Sucker",
+                             species == "YEP" ~ "Yellow Perch",
+                             TRUE ~ species)) %>% 
+  group_by(species) %>%
+  summarize(median_value = median(value)) %>%
+  arrange(desc(median_value)) %>%
+  pull(species)
+
+diff_of_diff %>% 
+  summarise(below_0 = sum(value < 0))
+
+all_diff %>%
+  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
+                             species == "BLG" ~ "Bluegill",
+                             species == "LMB" ~ "Largemouth Bass",
+                             species == "NOP" ~ "Northern Pike",
+                             species == "WAE" ~ "Walleye",
+                             species == "WTS" ~ "White Sucker",
+                             species == "YEP" ~ "Yellow Perch",
+                             TRUE ~ species),
+         species = factor(species, levels = species_order)) %>%  # Order species by median value
+  ggplot() +
+  stat_pointinterval(aes(x = species, y = value, color = species ), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+  xlab("") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(size = 10),
+        axis.title.y = element_text(size = 8))
+rm(species_order)
 ```
 
 
@@ -2925,4 +3003,5 @@ ggsave("BACI_lakes_map_complex.jpg", height = 5, width = 5, dpi = 600, bg = "whi
   
 rm(lake_summary, lake_sf, map_data, minnesota_sf, spec)
 ```
+
 
