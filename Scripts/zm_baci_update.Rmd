@@ -195,7 +195,8 @@ hg.model <- hg %>%
 rm(hg)
 ```
 
-# Data Coverage - pre BACI filtering
+# Data Coverage Scoping 
+- this does not need to run prior to analysis, it is exploration 
 ```{r}
 # zebra mussel coverage
 hg.model %>% 
@@ -352,7 +353,7 @@ hg.model %>%
 #pre lake grouping filtering (removing small fish and dealing with fish @ the LOD)
 hg.model <- hg.model %>% 
   filter(lgthin >= 5) %>% 
-  mutate(hgppm = case_when(hgcode == "K" ~ hgppm/2,
+  mutate(hgppm = case_when(hgcode == "K" ~ hgppm*0.5,
                            TRUE ~ hgppm))
 
 
@@ -510,7 +511,7 @@ blg_data <- create_species_data(species = "BLG", data = hg.model, lag_variable =
 blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable = "zm_sample_lag_2")
 lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
 yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
-wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
+#wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
 
 
 # Define species list and lagged variable names (including non-lagged "zm_sample")
@@ -533,8 +534,6 @@ for (species in species_list) {
 
 #Elapsed time summaries
 ```{r}
-
-
 # Define species list
 species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
 
@@ -584,7 +583,9 @@ for (species in species_list) {
     scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
     scale_fill_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
     theme_minimal() +
-    theme(legend.position = ifelse(species == "WTS", "right", "none"))  # Only show legend for the first plot
+    theme(#legend.position = ifelse(species == "WTS", "right", "none"),
+          legend.position = "none"
+          )  # Only show legend for the first plot
 
   
   # Store the plot in a list
@@ -595,7 +596,8 @@ for (species in species_list) {
 
 # Now `plots` contains a separate ggplot object for each species
 # Arrange the plots in a 2-column, 3-row grid (adjusted for 6 species)
-grid.arrange(grobs = plots, ncol = 2, nrow = 4)
+wrap_plots(plots)
+ggsave("delta_t_raw.jpg", width = 11, height = 7)
 
 #########per year marginal effect - lets just start with walleye###########
 fit_wae <- readRDS("Output/BACI/baci_update_wae.rds")
@@ -675,10 +677,184 @@ diff_of_diff %>%
         panel.grid.major.x = element_blank(),
         #axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
         axis.title.y = element_text(size = 8)) 
+
+
+species_list <- c("wae", "nop", "blg", "blc", "lmb", "yep", "wts")
+
+process_species <- function(species) {
+  # Load model
+  fit_species <- readRDS(paste0("Output/BACI/baci_update_", species, ".rds"))
+  
+  # Load species data
+  species_data <- get(paste0(species, "_data")) # Assuming each dataset is named accordingly
+  
+  species_data <- species_data %>%
+    mutate(year_infested = ifelse(is.na(year_infested), nearest_infested_year, year_infested)) %>%
+    mutate(year_inf_lag2 = year_infested + 2) %>% # time lag set to 2 years
+    mutate(post_inv = yearcoll > year_inf_lag2)
+  
+  group_deltas <- species_data %>% 
+    group_by(zm_lake, post_inv) %>% 
+    summarize(
+      mean_yr = mean(yearcoll), 
+      n_yr = length(unique(yearcoll)), 
+      .groups = "drop"
+    ) %>% 
+    pivot_wider(
+      names_from = post_inv, 
+      values_from = c(mean_yr, n_yr),
+      names_glue = "{.value}_post_inv_{post_inv}"
+    ) %>% 
+    mutate(delta_t = round(mean_yr_post_inv_TRUE - mean_yr_post_inv_FALSE, 2)) %>% 
+    mutate(zm_lake = case_when(zm_lake == "n" ~ "Uninvaded",
+                               zm_lake == "y" ~ "Zebra Mussel"))
+  
+  # Marginal effects based on specific length
+  length_stats <- species_data %>% 
+    summarise(mean_length = mean(lgthmm),
+              sd_length = sd(lgthmm))
+  specific_length_scaled <- (381 - length_stats$mean_length) / length_stats$sd_length
+  
+  marg_draws <- emmeans(fit_species, ~ zm_lake * zm_sample_lag_2, 
+                        at = list(scaled_length = specific_length_scaled), 
+                        re_formula = NA, 
+                        epred = TRUE) %>% 
+    gather_emmeans_draws() %>% 
+    mutate(hg_ppm = exp(.value))
+  
+  # Creating differences
+  contrasts_draws <- marg_draws %>% 
+    select(-.chain, -.iteration) %>% 
+    pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+                values_from = c(.value, hg_ppm))
+  
+  diff_lakes <- contrasts_draws %>% 
+    mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+           diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+    select(.draw, diff_reference, diff_zm) %>% 
+    pivot_longer(cols = c(diff_reference, diff_zm),
+                 names_to = "zm_lake",
+                 values_to = "value") %>% 
+    mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                               TRUE ~ "Uninvaded"))
+  
+  diff_lakes <- diff_lakes %>% 
+    left_join(group_deltas, by = "zm_lake") %>% 
+    mutate(value_per_year = value/delta_t)
+  
+  diff_of_diff <- diff_lakes %>% 
+    pivot_wider(names_from = zm_lake,
+                id_cols = .draw,
+                values_from = c("value", "value_per_year")) %>% 
+    mutate(diff = `value_Zebra Mussel` - value_Uninvaded,
+           diff_delta = `value_per_year_Zebra Mussel` - value_per_year_Uninvaded) %>% 
+    select(.draw, diff, diff_delta) %>% 
+    pivot_longer(cols = c(diff, diff_delta),
+                 names_to = "type",
+                 values_to = "values")
+  
+  # Plot
+  p <- diff_of_diff %>% 
+    ggplot() +
+    stat_pointinterval(aes(x = type, y = values, color = type), .width = c(.66, .95)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+    xlab("") +
+    scale_color_manual(values = c("lightblue", "salmon", "black")) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          panel.grid.major.x = element_blank(),
+          axis.title.y = element_text(size = 8)) +
+    ggtitle(species)
+  
+  return(p)
+}
+
+# Apply function over all species and store plots in a list
+species_plots <- map(species_list, process_species)
+
+wrap_plots(species_plots)
+ggsave("delta_t_marg_effect.jpg", width = 11, height = 7)
+
+
+#####time since invasion########################
+all_species <- bind_rows(blc_data, 
+                         blg_data,
+                         lmb_data,
+                         nop_data,
+                         wae_data,
+                         wts_data,
+                         yep_data) %>% 
+  mutate(impact_year = case_when(is.na(year_infested) ~ nearest_infested_year,
+                                 TRUE ~ year_infested),
+         time_since_invasion = yearcoll - impact_year,
+         impact_yn = case_when(time_since_invasion >= 0 ~ "y",
+                               TRUE ~ "n"),
+         impact_yn_lag2 = case_when(time_since_invasion - 2 >= 0 ~ "y",
+                                    TRUE ~ "n"))
+
+
+
+#here we go - lake level 
+lake_level_data <- all_species %>%
+  mutate(impact_groups = paste0(zm_lake, zm_lake)) %>% 
+  group_by(dow, spec, impact_groups) %>%
+  summarise(time_since_invasion = mean(time_since_invasion), .groups = "drop")
+
+max_count <- max(ggplot_build(
+  ggplot(lake_level_data, aes(x = time_since_invasion)) + 
+    geom_histogram(binwidth = 1)
+  )$data[[1]]$count, na.rm = TRUE)
+
+all_species %>% 
+  mutate(impact_groups = paste0(zm_lake)) %>% 
+  group_by(dow, spec, impact_groups) %>% 
+  summarise(time_since_invasion = mean(time_since_invasion)) %>% 
+  ggplot(aes(x = time_since_invasion, fill = impact_groups)) +
+  geom_histogram(binwidth = 1, alpha = 0.4, position = "identity", show.legend = FALSE) +
+  geom_density(aes(y = after_stat(density) * max_count * 1, color = impact_groups), # Scaling density
+               alpha = 0.01, linewidth = 1, show.legend = FALSE) +
+  scale_y_continuous(
+    name = "Histogram Count",
+    sec.axis = sec_axis(~ . / max_count, name = "Density (scaled)")
+  ) +
+  geom_vline(xintercept = 0) +
+  scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+  scale_fill_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+  theme_minimal() +
+  facet_wrap(~spec, scales = "free")
+
+#now do it pre and post for each lake
+lake_level_data <- all_species %>%
+  mutate(impact_groups = paste0(zm_lake, impact_yn)) %>% 
+  group_by(dow, spec, impact_groups) %>%
+  summarise(time_since_invasion = mean(time_since_invasion), .groups = "drop")
+
+max_count <- max(ggplot_build(
+  ggplot(lake_level_data, aes(x = time_since_invasion)) + 
+    geom_histogram(binwidth = 1)
+  )$data[[1]]$count, na.rm = TRUE)
+
+all_species %>% 
+  mutate(impact_groups = paste0(zm_lake, impact_yn)) %>% 
+  group_by(dow, spec, impact_groups) %>% 
+  summarise(time_since_invasion = mean(time_since_invasion)) %>% 
+  ggplot(aes(x = time_since_invasion, fill = impact_groups)) +
+  geom_histogram(binwidth = 1, alpha = 0.4, position = "identity", show.legend = FALSE) +
+  geom_density(aes(y = after_stat(density) * max_count * 1, color = impact_groups), # Scaling density
+               alpha = 0.01, linewidth = 1, show.legend = FALSE) +
+  scale_y_continuous(
+    name = "Histogram Count",
+    sec.axis = sec_axis(~ . / max_count, name = "Density (scaled)")
+  ) +
+  geom_vline(xintercept = 0) +
+  scale_color_manual("", values = c("lightblue", "lightblue", "salmon", "salmon"), labels = c("Uninvaded", "Uninvaded", "Zebra Mussel", "Zebra Mussel")) +
+  scale_fill_manual("", values = c("lightblue", "lightblue", "salmon", "salmon"), labels = c("Uninvaded", "Uninvaded", "Zebra Mussel", "Zebra Mussel")) +
+  theme_minimal() +
+  facet_wrap(~spec, scales = "free")
+
+rm(lake_level_data, all_species, max_count)
 ```
-
-
-
 
 #Summary Stats - lag year of 2 on ZM and Ref with matching
 ```{r}
@@ -1006,12 +1182,20 @@ rm(lake_summary, lakes_sf, minnesota_sf, spec, inset_height, inset_width, inset_
 
 1. example of running one model at a time - must change the invasion variables and data input
 ```{r}
+#setting priors 
+get_prior(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = wae_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+
 #walleye model fit
 fit_wae <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
              data = wae_data, 
              family = gaussian(), 
              iter = 20000,
-             warmup = 5000)
+             warmup = 5000,
+             prior = priors)
 #saveRDS(fit_wae, "baci_update_wae.rds")
 
 #northern pike model fit
@@ -1077,7 +1261,7 @@ summary(fit_yep)
 summary(fit_wts)
 ```
 
-2. looping over all NOP and WAE combos of zm_lag for sensitivity analysis 
+2. looping over all species combos of zm_lag for sensitivity analysis 
 ```{r}
 species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
 
@@ -2322,45 +2506,49 @@ ggsave(plot = probs_length, "length_probs_wae_nop.jpg", height = 5, width = 7, d
 
 ```
 
-#Figure 2 - with all 7 species 
+#Figure 2 - with 6 species 
 ```{r}
 #define lengths to be used in the marginal effects
 species_lengths <- tibble(
-  species = c("WAE", "NOP", "BLC", "BLG", "LMB", "WTS", "YEP"),
-  standard_length = c(381, 610, 205, 155, 305, 305, 205) # Adjust as needed
+  species = c("wae", "nop", "blc", "blg", "lmb", "yep"),
+  standard_length = c(381, 610, 205, 155, 305, 205) # Adjust as needed
 )
 
-species_datasets <- list(wae = wae_data,
-                         blc = blc_data,
-                         blg = blg_data,
-                         nop = nop_data,
-                         yep = yep_data,
-                         wts = wts_data,
-                         lmb = lmb_data)
+# species_datasets <- list(wae = wae_data,
+#                          blc = blc_data,
+#                          blg = blg_data,
+#                          nop = nop_data,
+#                          yep = yep_data,
+#                          lmb = lmb_data)
+
+species_summary_stats <- list(
+  nop = nop_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  wae = wae_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  blc = blc_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  blg = blg_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  lmb = lmb_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  yep = yep_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm))
+)
+
 
 #get summary data from model outputs
 species_summary <- species_lengths %>%
   mutate(summary_data = map2(species, standard_length, function(sp, len) {
     
-    sp_lower <- tolower(sp)
-    
-    # Filter dataset for species
-    species_data <- hg.model %>% 
-      filter(tolower(spec) == sp_lower) %>% 
-      mutate(lgthmm = lgthin * 25.4)
-    
-    # Calculate species-specific length scaling
-    length_stats <- species_data %>%
-      summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm))
+    # gather summary stats for scaled length back calculation
+    length_stats <- species_summary_stats[[sp]]
     
     specific_length_scaled <- (len - length_stats$mean_length) / length_stats$sd_length
+    print(specific_length_scaled)
 
     # Extract marginal effects from the model
-    marg_draws <- emmeans(get(paste0("fit_", sp_lower)), ~ zm_lake * zm_sample_lag_2,
+    marg_draws <- emmeans(get(paste0("fit_", sp)), ~ zm_lake * zm_sample_lag_2,
                           at = list(scaled_length = specific_length_scaled),
                           re_formula = NA, epred = TRUE) %>%
       gather_emmeans_draws() %>%
       mutate(hg_ppm = exp(.value))
+    print(head(marg_draws))
+
     
     # Transform data for plotting
     marg_draw_plot <- marg_draws %>%
@@ -2373,6 +2561,8 @@ species_summary <- species_lengths %>%
         TRUE ~ NA
       ),
       interaction = factor(interaction, levels = c("Uninvaded Before", "Uninvaded After", "Zebra Mussel Before", "Zebra Mussel After")))
+    print(unique(marg_draw_plot$interaction))
+    print(get(paste0("fit_", sp)))
 
     # Median line summary
     median_lines_plot <- marg_draw_plot %>%
@@ -2414,6 +2604,47 @@ species_summary <- species_lengths %>%
       diff_plot_data = diff_plot_data
     ))
   }))
+
+#species summary contains all of the data we need to create plots, just have to find those data
+
+#to save space in my memory, I am going to remove unneeded, large objects
+rm(fit_blc,
+   fit_blg,
+   fit_lmb,
+   fit_nop,
+   fit_wae,
+   fit_yep)
+
+#combined diff of diff
+combined_diff_of_diff <- species_summary %>%
+  mutate(diff_of_diff = map2(species, summary_data, function(sp, data) {
+    data$diff_plot_data %>%
+      mutate(species_diff = sp)  # Add the species column to the difference of difference data
+  })) %>% 
+  unnest(diff_of_diff)
+
+
+#lets first just plot the difference of difference for the species 
+diff_of_diff_data <- species_summary %>% 
+   mutate(diff_of_diff = map(summary_data, ~ .x$diff_plot_data %>%
+    filter(zm_lake == "Difference in Change"))) %>%
+  select(species, diff_of_diff) %>%
+  unnest(diff_of_diff)
+
+plot2 <- data$diff_plot_data %>% 
+      ggplot() +
+      stat_pointinterval(aes(x = zm_lake, y = value, color = zm_lake), .width = c(.66, .95)) +
+      geom_hline(yintercept = 0, linetype = "dashed") +
+      ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+      xlab("") +
+      scale_color_manual(values = c("lightblue", "salmon", "black")) +
+      theme_minimal() +
+      theme(legend.position = "none",
+            panel.grid.major.x = element_blank(),
+            #axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+            axis.text.x = element_blank(),
+            axis.title.y = element_text(size = 8)) +
+      ylim(-0.6, 0.6)
 
 
 #generate plots
@@ -2466,7 +2697,7 @@ species_plots <- species_summary %>%
     return(combined_plot)
   }))
 
-wrap_plots(species_plots$plot, ncol = 1)
+wrap_plots(species_plots$plot, ncol = 2)
 
 #plot with just the differences 
 all_diff <- species_summary %>%
@@ -2474,21 +2705,19 @@ all_diff <- species_summary %>%
   unnest(diff_plot_data)
 
 all_diff %>% 
-  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
-                             species == "BLG" ~ "Bluegill",
-                             species == "LMB" ~ "Largemouth Bass",
-                             species == "NOP" ~ "Northern Pike",
-                             species == "WAE" ~ "Walleye",
-                             species == "WTS" ~ "White Sucker",
-                             species == "YEP" ~ "Yellow Perch",
+  mutate(species = case_when(species == "blc" ~ "Black Crappie",
+                             species == "blg" ~ "Bluegill",
+                             species == "lmb" ~ "Largemouth Bass",
+                             species == "nop" ~ "Northern Pike",
+                             species == "wae" ~ "Walleye",
+                             species == "yep" ~ "Yellow Perch",
                              TRUE ~ species),
          species = factor(species, levels = c( "Northern Pike", 
                                                "Walleye",
                                                "Black Crappie", 
                                                "Largemouth Bass", 
                                                "Yellow Perch",
-                                               "Bluegill",
-                                               "White Sucker"))) %>% 
+                                               "Bluegill"))) %>% 
   ggplot() +
   stat_pointinterval(aes(x = species, y = value, color = species ), .width = c(.66, .95)) +
   geom_hline(yintercept = 0, linetype = "dashed") +
@@ -2502,45 +2731,39 @@ all_diff %>%
                                    size = 10),
         axis.title.y = element_text(size = 8))
 
-species_order <- all_diff %>%
-  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
-                             species == "BLG" ~ "Bluegill",
-                             species == "LMB" ~ "Largemouth Bass",
-                             species == "NOP" ~ "Northern Pike",
-                             species == "WAE" ~ "Walleye",
-                             species == "WTS" ~ "White Sucker",
-                             species == "YEP" ~ "Yellow Perch",
-                             TRUE ~ species)) %>% 
-  group_by(species) %>%
-  summarize(median_value = median(value)) %>%
-  arrange(desc(median_value)) %>%
-  pull(species)
-
-diff_of_diff %>% 
-  summarise(below_0 = sum(value < 0))
-
-all_diff %>%
-  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
-                             species == "BLG" ~ "Bluegill",
-                             species == "LMB" ~ "Largemouth Bass",
-                             species == "NOP" ~ "Northern Pike",
-                             species == "WAE" ~ "Walleye",
-                             species == "WTS" ~ "White Sucker",
-                             species == "YEP" ~ "Yellow Perch",
-                             TRUE ~ species),
-         species = factor(species, levels = species_order)) %>%  # Order species by median value
+all_diff %>% 
   ggplot() +
-  stat_pointinterval(aes(x = species, y = value, color = species ), .width = c(.66, .95)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
-  xlab("") +
-  theme_minimal() +
-  theme(legend.position = "none",
-        panel.grid.major.x = element_blank(),
-        axis.text.x = element_text(size = 10),
-        axis.title.y = element_text(size = 8))
-rm(species_order)
+  geom_density(aes(value, fill = species)) +
+  facet_wrap(~species)
 ```
+
+#new try with all species 
+```{r}
+species_lengths <- tibble(
+  species = c("wae", "nop", "blc", "blg", "lmb", "yep"),
+  standard_length = c(381, 610, 205, 155, 305, 205) # Adjust as needed
+)
+
+# species_datasets <- list(wae = wae_data,
+#                          blc = blc_data,
+#                          blg = blg_data,
+#                          nop = nop_data,
+#                          yep = yep_data,
+#                          lmb = lmb_data)
+
+species_summary_stats <- list(
+  nop = nop_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  wae = wae_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  blc = blc_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  blg = blg_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  lmb = lmb_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm)),
+  yep = yep_data %>% summarise(mean_length = mean(lgthmm), sd_length = sd(lgthmm))
+)
+
+
+```
+
+
 
 
 # Exploring Random Effects - dow

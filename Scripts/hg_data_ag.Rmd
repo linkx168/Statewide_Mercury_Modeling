@@ -349,3 +349,117 @@ wi_hg_zm %>%
             min_n = min(n))
 ```
 
+#future study lakes?
+```{r}
+zm_ssw <- read_csv("Data/zm_ssw_2025.csv")
+hg <- read_csv("Data/allfish_data_04042024_JLO.csv")
+
+#fix invasion data
+clean_lake_ids <- function(id) {
+  if (is.na(id) || id == "") return(NA_character_)  # Handle NA or empty values
+  
+  id_clean <- as.character(id)  # Ensure it's a character string
+  id_clean <- str_replace_all(id_clean, "-", "")  # Remove dashes
+  
+  # Ensure it has a leading zero if it originally had one
+  if (nchar(id_clean) < 6) {
+    id_clean <- str_pad(id_clean, width = 6, pad = "0", side = "left")
+  }
+  
+  # Ensure it's 8 digits long
+  if (nchar(id_clean) == 6) {
+    id_clean <- paste0(id_clean, "00")  # Append "00" if only 6 digits long
+  }
+  
+  return(id_clean)
+}
+
+zm_ssw %>% 
+  filter(lake_name == "North Twin")
+clean_lake_ids()
+
+zm_ssw <- zm_ssw %>% 
+  mutate(dow = sapply(dow, clean_lake_ids))
+rm(clean_lake_ids)
+
+#getting study lakes
+study_dows <- c(49007900, 47004901, 3057600, 29018500, 1006200, 21014500, 86025200,
+          34007900, 11030500, 11035800, 3015300, 73020000, 11016700, 3047500,
+          56074700, 18030800, 49012700, 11050400, 56061300, 47004600, 11020300, 04003000, 11014700, 86009000)
+study_dows <- str_pad(as.character(study_dows), width = 8, side = "left", pad = "0")
+study_dows <- tibble(dow = study_dows)
+
+study_comb <- study_dows %>% 
+  left_join(zm_ssw, by = "dow") %>% 
+  filter(!is.na(year_infested)) %>% 
+  pivot_wider(id_cols = c(dow, lake_name),
+              values_from = c(year_infested),
+              names_from = ais) %>% 
+  mutate(zm_invaded = case_when(!is.na(`zebra mussel`) ~ "y",
+                                TRUE ~ "n"),
+         ssw_invaded = case_when(!is.na(`starry stonewort`) ~ "y",
+                                TRUE ~ "n"),
+         both_invaded = case_when(!is.na(`zebra mussel`) & !is.na(`starry stonewort`) ~ "y",
+                                TRUE ~ "n")) 
+
+#nice, lets looks at some mercury values now
+clean_dowid <- function(id) {
+  if (is.na(id) || id == "") return(NA_character_)  # Handle NA values
+  id_clean <- str_replace_all(id, "-", "")  # Remove dashes
+  return(id_clean)
+}
+
+hg <- hg %>% 
+  mutate(dow = map_chr(DOWID, clean_dowid)) %>% 
+  mutate(dow = case_when(dow == "56074701" | dow == "56074702" ~ "56074700",
+                         dow == "73020000" | dow == "73020002" ~ "73020000",
+                         TRUE ~ dow)) 
+rm(clean_dowid)
+
+study_hg <- hg %>% 
+  right_join(study_comb, "dow")
+
+study_hg %>% 
+  group_by(dow, lake_name) %>%
+  summarise(n_hg = sum(!is.na(HGPPM)))
+
+#how many samples pre invasion?
+study_hg %>% 
+  group_by(dow, lake_name, `zebra mussel`) %>%
+  summarise(n_hg_pre = sum(YEARCOLL < `zebra mussel`),
+            n_hg_post = sum(YEARCOLL >= `zebra mussel`))
+
+study_hg %>% 
+  group_by(dow, lake_name, `starry stonewort`) %>%
+  summarise(n_hg_pre = sum(YEARCOLL < `starry stonewort`),
+            n_hg_post = sum(YEARCOLL >= `starry stonewort`))
+
+study_hg %>% 
+  filter(dow == "03057600") %>% 
+  mutate(zm = case_when(YEARCOLL < `zebra mussel` ~ "pre",
+                        YEARCOLL >= `zebra mussel` ~ "post")) %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, HGPPM, color = zm)) +
+  geom_smooth(aes(LGTHIN, HGPPM, color = zm)) +
+  facet_wrap(~SPEC)
+
+#any non-zm but ssw lakes?
+zm_ssw_lakes <- zm_ssw %>% 
+  filter(!is.na(dow)) %>%
+  filter(dow != "21021200") %>% 
+  pivot_wider(id_cols = c(dow, lake_name),
+              values_from = c(year_infested),
+              names_from = ais)
+zm_ssw_lakes %>% 
+  filter(is.na(`zebra mussel` & !is.na(`starry stonewort`)))
+#upper red, wolf, and rush actually have zm but they list zm with a different dow in list
+
+ssw_lakes <- zm_ssw_lakes %>% 
+  filter(is.na(`zebra mussel` & !is.na(`starry stonewort`))) %>% 
+  filter(!(dow %in% c("04007900", "04003501", "18031100"))) %>% 
+  mutate(dow)
+
+ssw_hg <- hg %>% 
+  right_join(ssw_lakes)
+```
+
