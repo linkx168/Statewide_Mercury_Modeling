@@ -36,14 +36,39 @@ fixlakeid <- function(lakeid){
 ```
 
 # Data - already filtered 
+*data below the LOD was arleady cut in half*
 ```{r}
+combined_data <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
 
+#break out for each species
+wae_data <- combined_data %>% 
+  filter(spec == "WAE")
+
+nop_data <- combined_data %>% 
+  filter(spec == "NOP")
+
+blc_data <- combined_data %>% 
+  filter(spec == "BLC")
+
+blg_data <- combined_data %>% 
+  filter(spec == "BLC")
+
+lmb_data <- combined_data %>% 
+  filter(spec == "LMB")
+
+yep_data <- combined_data %>% 
+  filter(spec == "YEP")
 ```
 
 ###########Model fitting##################
 
 #model runs - each individual species run seperatly
 ```{r}
+#set priors for all models so they are not informed by they model 
+priors <- c(prior(normal(1,100), class = Intercept),
+            prior(student_t(3, 0, 2.5), class = sd),
+            prior(student_t(3,0,2.5), class = sigma))
+
 #walleye model fit
 fit_wae <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
              data = wae_data, 
@@ -58,53 +83,51 @@ fit_nop <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + 
              data = nop_data, 
              family = gaussian(), 
              iter = 20000,
-             warmup = 5000)
+             warmup = 5000,
+             prior = priors)
 #saveRDS(fit_nop, "baci_update_nop.rds")
 
 fit_blg <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
              data = blg_data, 
              family = gaussian(), 
              iter = 20000,
-             warmup = 5000)
+             warmup = 5000,
+             prior = priors)
 #saveRDS(fit_blg, "baci_update_blg.rds")
 
 fit_blc <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
              data = blc_data, 
              family = gaussian(), 
              iter = 20000,
-             warmup = 5000)
+             warmup = 5000,
+             prior = priors)
 #saveRDS(fit_blc, "baci_update_blc.rds")
 
 fit_lmb <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
              data = lmb_data, 
              family = gaussian(), 
              iter = 20000,
-             warmup = 5000)
+             warmup = 5000,
+             prior = priors)
 #saveRDS(fit_lmb, "baci_update_lmb.rds")
 
 fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
              data = yep_data, 
              family = gaussian(), 
              iter = 20000,
-             warmup = 5000)
+             warmup = 5000,
+             prior = priors)
 #saveRDS(fit_yep, "baci_update_yep.rds")
-
-fit_wts <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
-             data = wts_data, 
-             family = gaussian(), 
-             iter = 20000,
-             warmup = 5000)
-#saveRDS(fit_wts, "baci_update_wts.rds")
 ```
 
 #saved model runs
 ```{r}
-fit_wae <- readRDS("Output/BACI/baci_update_wae.rds")
-fit_nop <- readRDS("Output/BACI/baci_update_nop.rds")
-fit_blg <- readRDS("Output/BACI/baci_update_blg.rds")
-fit_blc <- readRDS("Output/BACI/baci_update_blc.rds")
-fit_lmb <- readRDS("Output/BACI/baci_update_lmb.rds")
-fit_yep <- readRDS("Output/BACI/baci_update_yep.rds")
+fit_wae <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
+fit_nop <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
+fit_blg <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
+fit_lmb <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
+fit_yep <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
+fit_blc <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
 ```
 
 ######### Analysis #####################
@@ -126,9 +149,179 @@ summary(fit_blg)
 summary(fit_blc)
 summary(fit_lmb)
 summary(fit_yep)
+
+#plots
+plot(fit_wae)
+plot(fit_nop)
+plot(fit_blg)
+plot(fit_blc)
+plot(fit_lmb)
+plot(fit_yep)
 ```
 
-# Pulling marginal effects
+# Pulling marginal effects for all species
+```{r}
+#create a species specifc lengths for which the marginal effect will be calculated
+species_lengths <- tibble(
+  species = c("wae", "nop", "blc", "blg", "lmb", "yep"),
+  standard_length = c(381, 610, 205, 155, 305, 205) # Adjust as needed
+)
+
+# Create a named list of datasets
+species_datasets <- list(
+  wae = wae_data,
+  nop = nop_data,
+  blc = blc_data,
+  blg = blg_data,
+  lmb = lmb_data,
+  yep = yep_data
+)
+
+# Get summary stats for each species length to convert lengths to scaled lengths
+species_summary_stats <- map(species_datasets, ~ summarise(.x, mean_length = mean(lgthmm), sd_length = sd(lgthmm)))
+
+# Extract marginal effects and combine into one data frame
+# specific for each species, give emmeans the model fit and length
+# calculate expected marginal effect ignoring specific random effects 
+# convert the log scale back value back to hg ppm
+marginal_effects_all <- species_lengths %>%
+  mutate(marginal_draws = pmap(list(species, standard_length), function(sp, len) {
+    length_stats <- species_summary_stats[[sp]]
+    specific_length_scaled <- (len - length_stats$mean_length) / length_stats$sd_length
+    
+    emmeans(get(paste0("fit_", sp)), ~ zm_lake * zm_sample_lag_2,
+            at = list(scaled_length = specific_length_scaled),
+            re_formula = NA, epred = TRUE) %>%
+      gather_emmeans_draws() %>%
+      mutate(species_name = sp, hg_ppm = exp(.value))
+  })) %>%
+  unnest(marginal_draws)
+
+#we should see a marginal effect estimate for each draw from the postiror distribution for each species
+# 15,000 draws X 6 species = 90,000 obs
+glimpse(marginal_effects_all)
+
+# generate summaries for plotting
+
+#first clean up the invasion naming scheme
+marg_draw_plot <- marginal_effects_all %>%
+      mutate(interaction = paste0(zm_lake, zm_sample_lag_2)) %>%
+      mutate(interaction = case_when(
+        interaction == "nn" ~ "Uninvaded Before",
+        interaction == "ny" ~ "Uninvaded After",
+        interaction == "yn" ~ "Zebra Mussel Before",
+        interaction == "yy" ~ "Zebra Mussel After",
+        TRUE ~ NA
+      ),
+      interaction = factor(interaction, levels = c("Uninvaded Before", "Uninvaded After", "Zebra Mussel Before", "Zebra Mussel After")))
+
+# create lines connecting pre and post medians for each speciesXinvasion
+median_lines_plot <- marg_draw_plot %>%
+      group_by(interaction, zm_lake, species) %>%
+      summarize(median_hg_ppm = median(hg_ppm), .groups = "drop") %>%
+      mutate(zm_lake = case_when(zm_lake == "n" ~ "Uninvaded",
+                                 zm_lake == "y" ~ "Zebra Mussel"))
+
+#compute differences pre and post for each speciesXinvasion
+contrasts_draws <- marginal_effects_all %>% 
+      select(-.chain, -.iteration, -standard_length, -species_name) %>%
+  group_by(species, .draw) %>% 
+      pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+                  values_from = c(.value, hg_ppm))
+#compute the difference between zm lake and uninvaded lakes for each species
+diff_of_diff <- contrasts_draws %>% 
+    group_by(species) %>% 
+      mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+             diff_zm = hg_ppm_y_y - hg_ppm_y_n)  %>% 
+      select(species, .draw, diff_reference, diff_zm) %>% 
+      mutate(value = diff_zm - diff_reference) %>% 
+      select(species, .draw, value) %>% 
+      mutate(zm_lake = "Difference in Change")
+
+diff_lakes <- contrasts_draws %>% 
+  group_by(species) %>% 
+      mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+             diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+      select(species, .draw, diff_reference, diff_zm) %>% 
+      pivot_longer(cols = c(diff_reference, diff_zm),
+                   names_to = "zm_lake",
+                   values_to = "value") %>% 
+      mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                                 TRUE ~ "Uninvaded"))
+```
+
+# marginal effects plots
+```{r}
+diff_of_diff %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = species, y = value), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference of Before and After Impact \nBetween Zebra Mussel and Reference Lakes") +
+  xlab("") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.title.y = element_text(size = 12)) 
+
+plot1 <- diff_of_diff %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = value, y = species), .width = c(.66, .95)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  xlab("Difference of Before and After Impact \nBetween Zebra Mussel and Reference Lakes") +
+  ylab("") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.title.y = element_text(size = 12)) 
+
+
+plot2 <- marg_draw_plot %>%
+  ggplot(aes(x = interaction, y = hg_ppm, color = interaction, shape = interaction)) +
+  facet_wrap(~species) +
+  stat_pointinterval(
+    .width = c(.66, .95),
+    show.legend = F
+  )  +
+  scale_shape_manual("Sample Invasion",
+                     values = c(1, 16, 1, 16)) +
+  geom_line(
+    data = median_lines_plot,
+    aes(x = interaction, y = median_hg_ppm, group = zm_lake),
+    position = position_dodge(width = 0.1), # Align lines with intervals
+    inherit.aes = FALSE,
+    key_glyph = "rect",
+    #color = c("lightblue", "lightblue", "salmon", "salmon")
+  ) +
+  geom_hline(yintercept = 0.22, linetype = "dashed") +
+  ylab("Mercury Concentration (ppm)") +
+  xlab("") +
+   scale_color_manual("Lake Invasion", 
+                      values = c("lightblue", "lightblue", "salmon", "salmon")) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    axis.title.y = element_text(size = 7)
+  ) 
+
+#combined
+combined_plot <- plot1 / plot2
+combined_plot
+ggsave("almost.jpg", height = 7, width = 5)
+```
+
+# fish meals metric
+How many average size meals can the average size person eat in a month from uninvaded lakes?
+1. Calculate the total intake of mercury fish a fish of harvest-able size for an 8 oz meal serving
+```{r}
+#lets use those marginal effects from the previous plot again 
+
+
+```
+
 
 ################ all three below need to be updated to the data################
 

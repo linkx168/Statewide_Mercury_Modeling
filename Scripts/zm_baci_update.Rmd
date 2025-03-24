@@ -38,7 +38,7 @@ fixlakeid <- function(lakeid){
 # Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -69,7 +69,7 @@ hg <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
@@ -88,7 +88,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -2892,8 +2892,6 @@ ggsave("almost.jpg", height = 7, width = 5)
 ```
 
 
-
-
 # Exploring Random Effects - dow
 ```{r}
 #walleye - this is code to take the top 5, bottom 5, and mille lacs
@@ -3111,6 +3109,16 @@ ggsave("modeled_random_effects.jpg")
 
 # Old code 
 ```{r}
+#creating data for entire baci analysis 
+combined_data <- bind_rows(nop_data,
+                           wae_data,
+                           blg_data,
+                           blc_data,
+                           lmb_data,
+                           yep_data)
+glimpse(combined_data)
+write_csv(combined_data, "combined_hg_data.csv")
+
 #quick check 
 combined_species <- bind_rows(nop_data, wae_data)
 combined_species %>% 
