@@ -1,0 +1,645 @@
+---
+title: "zm_baci_update_clean"
+author: "Denver Link"
+date: "2025-03-24"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Library
+```{r}
+library(tidyverse)
+library(mwlaxeref)
+library(janitor)
+library(mnsentinellakes)
+library(sf)
+library(brms)
+library(emmeans)
+library(tidybayes)
+library(patchwork)
+library(cowplot)
+library(ggpubr)
+library(sf)
+library(tigris)
+library(ggspatial)
+library(gridExtra)
+
+
+#a function from mnsentinel lakes
+fixlakeid <- function(lakeid){
+  lakeid = gsub("-", "", as.character(lakeid))
+  lakeid[nchar(lakeid) == 7] = paste0("0", lakeid[nchar(lakeid) == 7]) # this line specifies to paste a leading zero only onto those values with 7 characters
+  lakeid # r will, by default, return the last variable in the body
+}
+
+```
+
+# Data - already filtered 
+```{r}
+
+```
+
+###########Model fitting##################
+
+#model runs - each individual species run seperatly
+```{r}
+#walleye model fit
+fit_wae <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = wae_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000,
+             prior = priors)
+#saveRDS(fit_wae, "baci_update_wae.rds")
+
+#northern pike model fit
+fit_nop <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = nop_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_nop, "baci_update_nop.rds")
+
+fit_blg <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = blg_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_blg, "baci_update_blg.rds")
+
+fit_blc <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = blc_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_blc, "baci_update_blc.rds")
+
+fit_lmb <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = lmb_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_lmb, "baci_update_lmb.rds")
+
+fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = yep_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_yep, "baci_update_yep.rds")
+
+fit_wts <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + (1|yearcoll), 
+             data = wts_data, 
+             family = gaussian(), 
+             iter = 20000,
+             warmup = 5000)
+#saveRDS(fit_wts, "baci_update_wts.rds")
+```
+
+#saved model runs
+```{r}
+fit_wae <- readRDS("Output/BACI/baci_update_wae.rds")
+fit_nop <- readRDS("Output/BACI/baci_update_nop.rds")
+fit_blg <- readRDS("Output/BACI/baci_update_blg.rds")
+fit_blc <- readRDS("Output/BACI/baci_update_blc.rds")
+fit_lmb <- readRDS("Output/BACI/baci_update_lmb.rds")
+fit_yep <- readRDS("Output/BACI/baci_update_yep.rds")
+```
+
+######### Analysis #####################
+
+#basic model fitting summaries 
+```{r}
+#priors
+prior_summary(fit_wae)
+prior_summary(fit_nop)
+prior_summary(fit_blg)
+prior_summary(fit_blc)
+prior_summary(fit_lmb)
+prior_summary(fit_yep)
+
+#model output
+summary(fit_wae)
+summary(fit_nop)
+summary(fit_blg)
+summary(fit_blc)
+summary(fit_lmb)
+summary(fit_yep)
+```
+
+# Pulling marginal effects
+
+################ all three below need to be updated to the data################
+
+# Map 
+```{r}
+combined_data <- bind_rows(nop_data, wae_data)
+
+#make sf objects
+lakes_sf <- st_as_sf(combined_data, coords = c("centroid_lon", "centroid_lat"), crs = 4326)
+
+mn_map <- states(cb = T) %>% 
+  filter(STUSPS == "MN")
+
+minnesota_sf <- st_as_sf(mn_map)
+rm(mn_map)
+
+#summarize some data
+lake_summary <- combined_data %>%
+  group_by(dow, spec) %>%
+  summarize(
+    distinct_years = n_distinct(yearcoll),
+    total_samples = n()
+  )
+
+
+spec <- combined_data %>% 
+  distinct(dow, spec) %>% 
+  pivot_wider(names_from = spec,
+              values_from = spec,
+              values_fn = length,
+              values_fill = list(spec = NA)) %>% 
+  mutate(species = case_when(NOP == "1" & WAE == "1" ~ "Walleye & Northern Pike",
+                          NOP == "1" & is.na(WAE) ~ "Northern Pike",
+                          TRUE ~ "Walleye"))
+
+lakes_sf <- lakes_sf %>%
+  left_join(lake_summary, by = c("dow", "spec")) %>% 
+  left_join(spec) %>% 
+  mutate(species_simp = species) %>% 
+  mutate(species = case_when(species == "Walleye & Northern Pike" & spec == "WAE" ~ "Both - Walleye",
+                             species == "Walleye & Northern Pike" & spec == "NOP" ~ "Both - Northern Pike",
+                             species == "Northern Pike" ~ "Northern Pike",
+                             species == "Walleye" ~ "Walleye"))
+
+#simple map showing lake locations by species 
+mn_map <- ggplot() +
+  # Plot Minnesota state
+  geom_sf(data = minnesota_sf, fill = "white", color = "black") +
+  
+  # Plot lakes with centroids
+  geom_sf(data = lakes_sf, 
+          aes(color = zm_lake, 
+              shape = species_simp),
+          size = 3) +
+  scale_color_manual("Invasion Status of Lake", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+  scale_shape_manual("Species Sampled", values = c(1, 3, 10)) +
+  # Remove gridlines and set white background
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid = element_blank(),
+        legend.position = c(.79, .4),
+         legend.box.background = element_rect(color = "black", size = 0.5),
+        legend.key.size = unit(.2, "cm")) +
+  annotation_scale(location = "tl") +
+  annotation_north_arrow(location = "br", which_north = "true")
+mn_map
+ggsave("BACI_lakes_map.jpg", height = 7, width = 7, dpi = 600, bg = "white")
+
+#with inset
+us_sf <- st_as_sf(maps::map("state", plot = F, fill = T))
+
+us_map <- ggplot() +
+  geom_sf(data = us_sf, fill = "gray90", color = "black", size = 0.3) +
+  geom_sf(data = minnesota_sf, fill = "red", color = "black") +
+  theme_void()
+
+inset_x <- 0.7
+inset_y <- 0.8
+inset_width <- 0.22
+inset_height <- 0.15
+
+ggdraw(mn_map) +
+  draw_plot(us_map, x = 0.7, y = 0.76, width = 0.22, height = 0.22) +
+  draw_line(x = c(inset_x, inset_x + inset_width), y = c(inset_y, inset_y), color = "black", size = 1) +  
+  draw_line(x = c(inset_x, inset_x + inset_width), y = c(inset_y + inset_height, inset_y + inset_height), color = "black", size = 1) +  
+  draw_line(x = c(inset_x, inset_x), y = c(inset_y, inset_y + inset_height), color = "black", size = 1) +  
+  draw_line(x = c(inset_x + inset_width, inset_x + inset_width), y = c(inset_y, inset_y + inset_height), color = "black", size = 1)  
+ggsave("BACI_lakes_map_inset.jpg", height = 7, width = 7, dpi = 600, bg = "white")
+
+
+rm(lake_summary, lakes_sf, minnesota_sf, spec, inset_height, inset_width, inset_x, inset_y, mn_map, us_sf, us_map)
+```
+
+# Data Coverage Stats
+```{r}
+#stats for the singular model run of 2 lag years ref and zm with matching
+combined_data <- bind_rows(nop_data, wae_data)
+
+lakes <- combined_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+write_csv(lakes, "baci_lake_stats.csv")
+rm(lakes)
+
+
+fish <- combined_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(mean = mean(lgthmm),
+            sd = sd(lgthmm),
+            min = min(lgthmm),
+            max = max(lgthmm),
+            n = n()) %>% 
+  print(n = nrow(.))
+write_csv(fish, "baci_fish_pre_post_stats.csv")
+rm(fish)
+
+fish <- combined_data %>% 
+  group_by(spec, zm_lake) %>% 
+  summarise(mean = mean(lgthmm),
+            sd = sd(lgthmm),
+            min = min(lgthmm),
+            max = max(lgthmm),
+            n = n())
+write_csv(fish, "baci_fish_invasion_stats.csv")
+rm(fish)
+
+fish <- combined_data %>% 
+  group_by(spec) %>% 
+  summarise(mean = mean(lgthmm),
+            sd = sd(lgthmm),
+            min = min(lgthmm),
+            max = max(lgthmm),
+            n_lakes = n_distinct(dow),
+            n = n())
+write_csv(fish, "baci_fish_spec_stats.csv")
+rm(fish)
+
+#limit of detection?
+combined_data %>% 
+  filter(hgcode == "K") %>% 
+  group_by(hgcode, hgppm, spec) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+#how many unique lakes across species
+combined_data %>% 
+  group_by(zm_lake) %>% 
+  summarise(n_distinct(dow))
+
+#other species?
+blg_data <- create_species_data(species = "BLG", data = hg.model, lag_variable = "zm_sample_lag_2")
+blg_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+blg_data %>% 
+  filter(zm_lake == "y") %>% 
+  group_by(waterway, zm_sample_lag_2) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
+lmb_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable = "zm_sample_lag_2")
+blc_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
+yep_data %>% 
+  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
+  summarise(n_lakes = n_distinct(dow),
+            n_years = n_distinct(yearcoll),
+            n_samples = n()) %>% 
+  print(n = nrow(.))
+rm(blc_data, blg_data, lmb_data, yep_data)
+```
+
+# Elapsed time summaries
+```{r}
+# Define species list
+species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
+
+# Create an empty list to store plots
+plots <- list()
+
+# Loop over species
+for (species in species_list) {
+  
+  # Step 1: Create species-specific data
+  species_data <- create_species_data(species = species, data = hg.model, lag_variable = "zm_sample_lag_2")
+  
+  # Step 2: Process infestation year and post_inv flag
+  species_data <- species_data %>%
+    mutate(year_infested = ifelse(is.na(year_infested), nearest_infested_year, year_infested)) %>%
+    mutate(year_inf_lag2 = year_infested + 2) %>% # time lag set to 2 years
+    mutate(post_inv = yearcoll > year_inf_lag2)
+  
+  # Step 3: Calculate pre/post mean year values
+  lake_deltas <- species_data %>%
+    group_by(waterway, dow, post_inv, zm_lake, year_inf_lag2) %>%
+    summarize(
+      mean_yr = mean(yearcoll),
+      n_yr = length(unique(yearcoll)),
+      .groups = "drop"
+    ) %>%
+    pivot_wider(
+      names_from = post_inv, 
+      values_from = c(mean_yr, n_yr),
+      names_glue = "{.value}_post_inv_{post_inv}"
+    ) %>%
+    mutate(delta_t = round(mean_yr_post_inv_TRUE - mean_yr_post_inv_FALSE, 2))
+  
+  # Step 4: Compute max count for scaling density plot
+  max_count <- max(ggplot_build(ggplot(lake_deltas, aes(x = delta_t)) + 
+                                  geom_histogram(binwidth = 1))$data[[1]]$count, na.rm = TRUE)
+  
+  # Step 5: Create the plot
+  p <- ggplot(lake_deltas, aes(x = delta_t, fill = zm_lake)) +
+    geom_histogram(aes(y = ..count..), binwidth = 1, alpha = 0.4, position = "identity", show.legend = FALSE) +
+    geom_density(aes(y = ..density.. * 10* max_count, color = zm_lake), alpha = 0.01, size = 1, show.legend = species == "WTS") +  # Only show legend for the first plot
+    scale_y_continuous(
+      name = "Histogram Count",
+      sec.axis = sec_axis(~ . / max_count, name = "Density x10")
+    ) +
+    labs(x = "Delta T", fill = "ZM Lake", color = "ZM Lake", title = species) +
+    scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+    scale_fill_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+    theme_minimal() +
+    theme(#legend.position = ifelse(species == "WTS", "right", "none"),
+          legend.position = "none"
+          )  # Only show legend for the first plot
+
+  
+  # Store the plot in a list
+  plots[[species]] <- p
+  
+
+}
+
+# Now `plots` contains a separate ggplot object for each species
+# Arrange the plots in a 2-column, 3-row grid (adjusted for 6 species)
+wrap_plots(plots)
+ggsave("delta_t_raw.jpg", width = 11, height = 7)
+
+#########per year marginal effect - lets just start with walleye###########
+fit_wae <- readRDS("Output/BACI/baci_update_wae.rds")
+
+group_deltas <- wae_data %>% 
+  group_by(zm_lake, post_inv) %>% 
+  summarize(
+    mean_yr = mean(yearcoll), 
+    n_yr = length(unique(yearcoll)), 
+    .groups = "drop"
+  ) %>% 
+  pivot_wider(
+    names_from = post_inv, 
+    values_from = c(mean_yr, n_yr),
+    names_glue = "{.value}_post_inv_{post_inv}"
+  ) %>% 
+  mutate(delta_t = round(mean_yr_post_inv_TRUE - mean_yr_post_inv_FALSE, 2)) %>% 
+  mutate(zm_lake = case_when(zm_lake == "n" ~ "Uninvaded",
+                             zm_lake == "y" ~ "Zebra Mussel"))
+
+#marginal effects based on specific length
+length_stats <-  wae_data %>% 
+  summarise(mean_length = mean(lgthmm),
+            sd_length = sd(lgthmm))
+specific_length_scaled <- (381 - length_stats$mean_length) / length_stats$sd_length
+
+marg_draws <- emmeans(fit_wae, ~ zm_lake * zm_sample_lag_2, 
+                      at = list(scaled_length = specific_length_scaled), 
+                      re_fromula = NA, 
+                      epred = T) %>% 
+  gather_emmeans_draws() %>% 
+  mutate(hg_ppm = exp(.value))
+
+
+#creating differences
+contrasts_draws <- marg_draws %>% 
+  select(-.chain, -.iteration) %>% 
+  pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+              values_from = c(.value, hg_ppm))
+
+diff_lakes <- contrasts_draws %>% 
+  mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+         diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+  select(.draw, diff_reference, diff_zm) %>% 
+  pivot_longer(cols = c(diff_reference, diff_zm),
+               names_to = "zm_lake",
+               values_to = "value") %>% 
+  mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                             TRUE ~ "Uninvaded"))
+
+
+diff_lakes <- diff_lakes %>% 
+  left_join(group_deltas, by = "zm_lake") %>% 
+  mutate(value_per_year = value/delta_t)
+
+diff_of_diff <- diff_lakes %>% 
+  pivot_wider(names_from = zm_lake,
+              id_cols = .draw,
+              values_from = c("value", "value_per_year")) %>% 
+  mutate(diff = `value_Zebra Mussel` - value_Uninvaded,
+         diff_delta = `value_per_year_Zebra Mussel` - value_per_year_Uninvaded) %>% 
+  select(.draw, diff, diff_delta) %>% 
+  pivot_longer(cols = c(diff, diff_delta),
+               names_to = "type",
+               values_to = "values")
+
+
+diff_of_diff %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = type, y = values, color = type), .width = c(.66, .95)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+  xlab("") +
+  scale_color_manual(values = c("lightblue", "salmon", "black")) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        #axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.title.y = element_text(size = 8)) 
+
+
+species_list <- c("wae", "nop", "blg", "blc", "lmb", "yep", "wts")
+
+process_species <- function(species) {
+  # Load model
+  fit_species <- readRDS(paste0("Output/BACI/baci_update_", species, ".rds"))
+  
+  # Load species data
+  species_data <- get(paste0(species, "_data")) # Assuming each dataset is named accordingly
+  
+  species_data <- species_data %>%
+    mutate(year_infested = ifelse(is.na(year_infested), nearest_infested_year, year_infested)) %>%
+    mutate(year_inf_lag2 = year_infested + 2) %>% # time lag set to 2 years
+    mutate(post_inv = yearcoll > year_inf_lag2)
+  
+  group_deltas <- species_data %>% 
+    group_by(zm_lake, post_inv) %>% 
+    summarize(
+      mean_yr = mean(yearcoll), 
+      n_yr = length(unique(yearcoll)), 
+      .groups = "drop"
+    ) %>% 
+    pivot_wider(
+      names_from = post_inv, 
+      values_from = c(mean_yr, n_yr),
+      names_glue = "{.value}_post_inv_{post_inv}"
+    ) %>% 
+    mutate(delta_t = round(mean_yr_post_inv_TRUE - mean_yr_post_inv_FALSE, 2)) %>% 
+    mutate(zm_lake = case_when(zm_lake == "n" ~ "Uninvaded",
+                               zm_lake == "y" ~ "Zebra Mussel"))
+  
+  # Marginal effects based on specific length
+  length_stats <- species_data %>% 
+    summarise(mean_length = mean(lgthmm),
+              sd_length = sd(lgthmm))
+  specific_length_scaled <- (381 - length_stats$mean_length) / length_stats$sd_length
+  
+  marg_draws <- emmeans(fit_species, ~ zm_lake * zm_sample_lag_2, 
+                        at = list(scaled_length = specific_length_scaled), 
+                        re_formula = NA, 
+                        epred = TRUE) %>% 
+    gather_emmeans_draws() %>% 
+    mutate(hg_ppm = exp(.value))
+  
+  # Creating differences
+  contrasts_draws <- marg_draws %>% 
+    select(-.chain, -.iteration) %>% 
+    pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+                values_from = c(.value, hg_ppm))
+  
+  diff_lakes <- contrasts_draws %>% 
+    mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
+           diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>% 
+    select(.draw, diff_reference, diff_zm) %>% 
+    pivot_longer(cols = c(diff_reference, diff_zm),
+                 names_to = "zm_lake",
+                 values_to = "value") %>% 
+    mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
+                               TRUE ~ "Uninvaded"))
+  
+  diff_lakes <- diff_lakes %>% 
+    left_join(group_deltas, by = "zm_lake") %>% 
+    mutate(value_per_year = value/delta_t)
+  
+  diff_of_diff <- diff_lakes %>% 
+    pivot_wider(names_from = zm_lake,
+                id_cols = .draw,
+                values_from = c("value", "value_per_year")) %>% 
+    mutate(diff = `value_Zebra Mussel` - value_Uninvaded,
+           diff_delta = `value_per_year_Zebra Mussel` - value_per_year_Uninvaded) %>% 
+    select(.draw, diff, diff_delta) %>% 
+    pivot_longer(cols = c(diff, diff_delta),
+                 names_to = "type",
+                 values_to = "values")
+  
+  # Plot
+  p <- diff_of_diff %>% 
+    ggplot() +
+    stat_pointinterval(aes(x = type, y = values, color = type), .width = c(.66, .95)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
+    xlab("") +
+    scale_color_manual(values = c("lightblue", "salmon", "black")) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          panel.grid.major.x = element_blank(),
+          axis.title.y = element_text(size = 8)) +
+    ggtitle(species)
+  
+  return(p)
+}
+
+# Apply function over all species and store plots in a list
+species_plots <- map(species_list, process_species)
+
+wrap_plots(species_plots)
+ggsave("delta_t_marg_effect.jpg", width = 11, height = 7)
+
+
+#####time since invasion########################
+all_species <- bind_rows(blc_data, 
+                         blg_data,
+                         lmb_data,
+                         nop_data,
+                         wae_data,
+                         wts_data,
+                         yep_data) %>% 
+  mutate(impact_year = case_when(is.na(year_infested) ~ nearest_infested_year,
+                                 TRUE ~ year_infested),
+         time_since_invasion = yearcoll - impact_year,
+         impact_yn = case_when(time_since_invasion >= 0 ~ "y",
+                               TRUE ~ "n"),
+         impact_yn_lag2 = case_when(time_since_invasion - 2 >= 0 ~ "y",
+                                    TRUE ~ "n"))
+
+
+
+#here we go - lake level 
+lake_level_data <- all_species %>%
+  mutate(impact_groups = paste0(zm_lake, zm_lake)) %>% 
+  group_by(dow, spec, impact_groups) %>%
+  summarise(time_since_invasion = mean(time_since_invasion), .groups = "drop")
+
+max_count <- max(ggplot_build(
+  ggplot(lake_level_data, aes(x = time_since_invasion)) + 
+    geom_histogram(binwidth = 1)
+  )$data[[1]]$count, na.rm = TRUE)
+
+all_species %>% 
+  mutate(impact_groups = paste0(zm_lake)) %>% 
+  group_by(dow, spec, impact_groups) %>% 
+  summarise(time_since_invasion = mean(time_since_invasion)) %>% 
+  ggplot(aes(x = time_since_invasion, fill = impact_groups)) +
+  geom_histogram(binwidth = 1, alpha = 0.4, position = "identity", show.legend = FALSE) +
+  geom_density(aes(y = after_stat(density) * max_count * 1, color = impact_groups), # Scaling density
+               alpha = 0.01, linewidth = 1, show.legend = FALSE) +
+  scale_y_continuous(
+    name = "Histogram Count",
+    sec.axis = sec_axis(~ . / max_count, name = "Density (scaled)")
+  ) +
+  geom_vline(xintercept = 0) +
+  scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+  scale_fill_manual("", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+  theme_minimal() +
+  facet_wrap(~spec, scales = "free")
+
+#now do it pre and post for each lake
+lake_level_data <- all_species %>%
+  mutate(impact_groups = paste0(zm_lake, impact_yn)) %>% 
+  group_by(dow, spec, impact_groups) %>%
+  summarise(time_since_invasion = mean(time_since_invasion), .groups = "drop")
+
+max_count <- max(ggplot_build(
+  ggplot(lake_level_data, aes(x = time_since_invasion)) + 
+    geom_histogram(binwidth = 1)
+  )$data[[1]]$count, na.rm = TRUE)
+
+all_species %>% 
+  mutate(impact_groups = paste0(zm_lake, impact_yn)) %>% 
+  group_by(dow, spec, impact_groups) %>% 
+  summarise(time_since_invasion = mean(time_since_invasion)) %>% 
+  ggplot(aes(x = time_since_invasion, fill = impact_groups)) +
+  geom_histogram(binwidth = 1, alpha = 0.4, position = "identity", show.legend = FALSE) +
+  geom_density(aes(y = after_stat(density) * max_count * 1, color = impact_groups), # Scaling density
+               alpha = 0.01, linewidth = 1, show.legend = FALSE) +
+  scale_y_continuous(
+    name = "Histogram Count",
+    sec.axis = sec_axis(~ . / max_count, name = "Density (scaled)")
+  ) +
+  geom_vline(xintercept = 0) +
+  scale_color_manual("", values = c("lightblue", "lightblue", "salmon", "salmon"), labels = c("Uninvaded", "Uninvaded", "Zebra Mussel", "Zebra Mussel")) +
+  scale_fill_manual("", values = c("lightblue", "lightblue", "salmon", "salmon"), labels = c("Uninvaded", "Uninvaded", "Zebra Mussel", "Zebra Mussel")) +
+  theme_minimal() +
+  facet_wrap(~spec, scales = "free")
+
+rm(lake_level_data, all_species, max_count)
+```
+
