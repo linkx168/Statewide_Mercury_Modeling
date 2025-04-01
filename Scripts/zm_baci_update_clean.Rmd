@@ -37,9 +37,9 @@ fixlakeid <- function(lakeid){
 ```
 
 # Data - already filtered 
-*data below the LOD was arleady cut in half*
+*data below the LOD was already cut in half*
 ```{r}
-combined_data <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
+combined_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
 
 #break out for each species
 wae_data <- combined_data %>% 
@@ -123,12 +123,12 @@ fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + 
 
 #saved model runs
 ```{r}
-fit_wae <- readRDS(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
-fit_nop <- readRDS(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
-fit_blg <- readRDS(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
-fit_lmb <- readRDS(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
-fit_yep <- readRDS(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
-fit_blc <- readRDS(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
+fit_wae <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
+fit_nop <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
+fit_blg <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
+fit_lmb <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
+fit_yep <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
+fit_blc <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
 ```
 
 ######### Analysis #####################
@@ -158,11 +158,19 @@ plot(fit_blg)
 plot(fit_blc)
 plot(fit_lmb)
 plot(fit_yep)
+
+#posterior checks
+pp_check(fit_wae)
+pp_check(fit_nop)
+pp_check(fit_blg)
+pp_check(fit_blc)
+pp_check(fit_lmb)
+pp_check(fit_yep)
 ```
 
 # Pulling marginal effects for all species
 ```{r}
-#create a species specifc lengths for which the marginal effect will be calculated
+#create a species specific lengths for which the marginal effect will be calculated
 species_lengths <- tibble(
   species = c("wae", "nop", "blc", "blg", "lmb", "yep"),
   standard_length = c(381, 610, 205, 155, 305, 205) # Adjust as needed
@@ -276,12 +284,12 @@ species_images <- data.frame(
               "Black Crappie",
               "Yellow Perch", 
               "Bluegill"),
-  img = c(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
-          file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
-          file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
-          file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
-          file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
-          file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg"))
+  img = c(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg"))
 )
 
 diff_of_diff %>% 
@@ -313,7 +321,7 @@ plot1 <- diff_of_diff %>%
   ggplot() +
   stat_pointinterval(aes(x = value, y = species), .width = c(.66, .95)) +
   geom_vline(xintercept = 0, linetype = "dashed") +
-  xlab("Difference of Before and After Impact \nBetween Zebra Mussel and Reference Lakes") +
+  xlab("Difference Before and After Impact \nBetween Zebra Mussel and Reference Lakes") +
   ylab("") +
   scale_x_continuous(limits = c(-0.04, 0.04))+
   theme_minimal() +
@@ -326,6 +334,7 @@ plot1
 plot1 <- plot1 +
   geom_image(data = species_images, aes(y = species, x = -.035, image = img), size = .15)
 plot1
+#ggsave("diff_of_diff.jpg", width = 7, height = 5, dpi = 600)
 
 
 plot2 <- marg_draw_plot %>%
@@ -377,13 +386,53 @@ plot2 <- marg_draw_plot %>%
     strip.text = element_text(face = "bold", size = 6),
     panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5) 
   ) 
+plot2
+
+#get species images and positions for the second plot
+species_images <- marg_draw_plot %>% 
+  group_by(species_name, zm_lake) %>%
+  median_qi(hg_ppm, width = c(.95)) %>%
+  filter(zm_lake == "n") %>% 
+  select(species_name, hg_ppm.upper) %>% 
+  group_by(species_name) %>% 
+  summarise(y = case_when(species_name == "nop" ~ .34,
+                          species_name == "wae" ~ .215,
+                          species_name == "lmb" ~ .205,
+                          species_name == "blc" ~ .2,
+                          species_name == "yep" ~ .2,
+                          species_name == "blg" ~ .2)) %>% 
+  mutate(species = as.factor(case_when(species_name == "wae" ~ "Walleye",
+                             species_name == "nop" ~ "Northern Pike",
+                             species_name == "lmb" ~ "Largemouth Bass",
+                             species_name == "blc" ~ "Black Crappie",
+                             species_name == "yep" ~ "Yellow Perch",
+                             species_name == "blg" ~ "Bluegill",
+                             TRUE ~ species_name)),
+         species = factor(species, levels = c("Northern Pike",
+                                              "Walleye",
+                                              "Largemouth Bass",
+                                              "Black Crappie",
+                                              "Yellow Perch",
+                                              "Bluegill")),
+         img = case_when(species == "Walleye" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"),
+                         species == "Northern Pike" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"),
+                         species == "Largemouth Bass" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"),
+                         species == "Black Crappie" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+                         species == "Yellow Perch" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+                         species == "Bluegill" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
+         x = 1.5)
+
+plot2_icons <- plot2 +
+  geom_image(data = species_images, aes(y = y, x = x, image = img), size = .3, inherit.aes = F)
+plot2_icons
+#ggsave("baci_spec.jpg", width = 7, height = 5, dpi = 600)
 
 
 
 #combined
 combined_plot <-  plot2 + plot1 
 combined_plot
-ggsave("almost.jpg", height = 5, width = 9)
+#ggsave("baci_and_diff.jpg", height = 5, width = 9)
 ```
 
 # fish meals metric
@@ -391,53 +440,6 @@ How many average size meals can the average size person eat in a month from unin
 -I first do it within each of the 4 invasion groupings
 -I then do it by discounting zm post by the difference in uninvaded pre and post
 ```{r}
-#lets use those marginal effects to calculate this - and keep track of our units as we go
-marg_draw_plot <- marg_draw_plot %>% 
-  #hg_ppm (ug/g) * grams of meal = ug of mercury ingested
-  mutate(hg_intake_mircogram = hg_ppm * 227) %>% 
-  #safe ingestion of 0.1 ug/kg/day for a 80 kg individual - extrapolated to longer time periods 
-  # ug/(kg*d) * kg = safe intake ug/time  
-  mutate(max_intake_day = 0.1 * 80,
-        max_intake_week = max_intake_day*7,
-        max_intake_month = max_intake_day*30) %>% 
-  #max meals per week = safe/ ug in meal
-  mutate(safe_consumption_day = max_intake_day/hg_intake_mircogram,
-         safe_consumption_week = max_intake_week/hg_intake_mircogram,
-         safe_consumption_month = max_intake_month/hg_intake_mircogram)
-glimpse(marg_draw_plot)
-
-#meals summary
-sum_meals <- marg_draw_plot %>% 
-  group_by(species, interaction) %>% 
-  summarise(median_meals_month = median(safe_consumption_month)) %>% 
-  print(n = nrow(.))
-
-#diff meals summary
-sum_meals %>% 
-  pivot_wider(id_cols = species,
-              names_from = interaction,
-              values_from = median_meals_month) %>% 
-  mutate(diff_uninvaded = `Uninvaded After` - `Uninvaded Before`,
-         diff_zm = `Zebra Mussel After` - `Zebra Mussel Before`) %>% 
-  select(species, diff_uninvaded, diff_zm)
-
-#plots 
-marg_draw_plot %>% 
-  ggplot(aes(interaction, safe_consumption_week, color = interaction)) +
-  stat_pointinterval(.width = c(.66, .95)) +
-  scale_color_manual("Lake Invasion", 
-                      values = c("lightblue", "lightblue", "salmon", "salmon")) +
-  theme_minimal() +
-  ylab("Safe Meals Per Week") +
-  xlab("") +
-  facet_wrap(~species, scales = "free") +
-  theme(
-    legend.position = "bottom",
-    panel.grid.major.x = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
-    axis.title.y = element_text(size = 7)
-  ) 
-
 ############## first discount zm after by the change in uninvaded ############
 #within a draw find the difference pre and post invaded 
 #discount
@@ -483,12 +485,18 @@ discount <- marg_draw_plot %>%
   mutate(interaction = as.factor(case_when(interaction == "Zebra Mussel Before" ~ "Before",
                                  TRUE ~ "After")),
          interaction = factor(interaction, levels = c("Before", "After"))) %>% 
-  mutate(species = case_when(species == "wae" ~ "Walleye",
+  mutate(species = as.factor(case_when(species == "wae" ~ "Walleye",
                              species == "nop" ~ "Northern Pike",
                              species == "lmb" ~ "Largemouth Bass",
                              species == "blc" ~ "Black Crappie",
                              species == "yep" ~ "Yellow Perch",
-                             species == "blg" ~ "Bluegill"))
+                             species == "blg" ~ "Bluegill")), 
+         species = factor(species, levels = c("Northern Pike",
+                                              "Walleye",
+                                              "Largemouth Bass",
+                                              "Black Crappie",
+                                              "Yellow Perch",
+                                              "Bluegill")))
 
 #meals summary
 sum_meals <- discount %>% 
@@ -506,8 +514,6 @@ sum_meals %>%
 
 #meals per week
 discount %>% 
-  mutate(species = case_when(species == "bluegill" ~ "Bluegill",
-                             TRUE ~ species)) %>% 
   ggplot(aes(interaction, safe_consumption_week, color = interaction)) +
   stat_pointinterval(.width = c(.66, .95)) +
   theme_minimal() +
@@ -526,9 +532,7 @@ discount %>%
   ) 
 
 #meals per month
-discount %>% 
-  mutate(species = case_when(species == "bluegill" ~ "Bluegill",
-                             TRUE ~ species)) %>% 
+meals1 <- discount %>% 
   ggplot(aes(interaction, safe_consumption_month, color = interaction)) +
   stat_pointinterval(.width = c(.66, .95)) +
   theme_minimal() +
@@ -545,20 +549,91 @@ discount %>%
     strip.text = element_text(face = "bold"),
     panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5) 
   ) 
+meals1
+
+species_images <- data.frame(
+  species = c("Walleye", 
+              "Northern Pike", 
+              "Largemouth Bass", 
+              "Black Crappie",
+              "Yellow Perch", 
+              "Bluegill"),
+  img = c(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
+  x = 1.5,
+  y = c(6.5, 4.25, 9, 18, 40, 27)
+)
+
+meals_icons <- meals1 + 
+  geom_image(data = species_images, aes(y = y, x = x, image = img), size = .3, inherit.aes = F)
+meals_icons
 ggsave("diff_meals.jpg", height = 5, width = 7, units = "in", dpi = 600)
 
 rm(marg_draw_plot, sum_meals, marginal_effects_all, discount)
+
+###############code below to make for each level of the baci#################
+#lets use those marginal effects to calculate this - and keep track of our units as we go
+marg_draw_plot <- marg_draw_plot %>% 
+  #hg_ppm (ug/g) * grams of meal = ug of mercury ingested
+  mutate(hg_intake_mircogram = hg_ppm * 227) %>% 
+  #safe ingestion of 0.1 ug/kg/day for a 80 kg individual - extrapolated to longer time periods 
+  # ug/(kg*d) * kg = safe intake ug/time  
+  mutate(max_intake_day = 0.1 * 75,
+        max_intake_week = max_intake_day*7,
+        max_intake_month = max_intake_day*30) %>% 
+  #max meals per week = safe/ ug in meal
+  mutate(safe_consumption_day = max_intake_day/hg_intake_mircogram,
+         safe_consumption_week = max_intake_week/hg_intake_mircogram,
+         safe_consumption_month = max_intake_month/hg_intake_mircogram)
+glimpse(marg_draw_plot)
+
+#meals summary
+sum_meals <- marg_draw_plot %>% 
+  group_by(species, interaction) %>% 
+  summarise(median_meals_month = median(safe_consumption_month)) %>% 
+  print(n = nrow(.))
+
+#diff meals summary
+sum_meals %>% 
+  pivot_wider(id_cols = species,
+              names_from = interaction,
+              values_from = median_meals_month) %>% 
+  mutate(diff_uninvaded = `Uninvaded After` - `Uninvaded Before`,
+         diff_zm = `Zebra Mussel After` - `Zebra Mussel Before`) %>% 
+  select(species, diff_uninvaded, diff_zm)
+
+#plots 
+marg_draw_plot %>% 
+  ggplot(aes(interaction, safe_consumption_week, color = interaction)) +
+  stat_pointinterval(.width = c(.66, .95)) +
+  scale_color_manual("Lake Invasion", 
+                      values = c("lightblue", "lightblue", "salmon", "salmon")) +
+  theme_minimal() +
+  ylab("Safe Meals Per Week") +
+  xlab("") +
+  facet_wrap(~species, scales = "free") +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    axis.title.y = element_text(size = 7)
+  ) 
 ```
 
-
-################ all three below need to be updated to the data################
-
 # Map 
+- I first make a map of any lake included in the study, regardless of species 
+- I then make species specific maps
+- I tried to combine them but it will probably be easier to do that outside of R or leave them separate 
 ```{r}
-combined_data <- bind_rows(nop_data, wae_data)
+lake_locs <- combined_data %>% 
+  distinct(dow, waterway, centroid_lat, centroid_lon, zm_lake)
 
 #make sf objects
-lakes_sf <- st_as_sf(combined_data, coords = c("centroid_lon", "centroid_lat"), crs = 4326)
+lakes_sf <- st_as_sf(lake_locs, coords = c("centroid_lon", "centroid_lat"), crs = 4326)
 
 mn_map <- states(cb = T) %>% 
   filter(STUSPS == "MN")
@@ -566,33 +641,6 @@ mn_map <- states(cb = T) %>%
 minnesota_sf <- st_as_sf(mn_map)
 rm(mn_map)
 
-#summarize some data
-lake_summary <- combined_data %>%
-  group_by(dow, spec) %>%
-  summarize(
-    distinct_years = n_distinct(yearcoll),
-    total_samples = n()
-  )
-
-
-spec <- combined_data %>% 
-  distinct(dow, spec) %>% 
-  pivot_wider(names_from = spec,
-              values_from = spec,
-              values_fn = length,
-              values_fill = list(spec = NA)) %>% 
-  mutate(species = case_when(NOP == "1" & WAE == "1" ~ "Walleye & Northern Pike",
-                          NOP == "1" & is.na(WAE) ~ "Northern Pike",
-                          TRUE ~ "Walleye"))
-
-lakes_sf <- lakes_sf %>%
-  left_join(lake_summary, by = c("dow", "spec")) %>% 
-  left_join(spec) %>% 
-  mutate(species_simp = species) %>% 
-  mutate(species = case_when(species == "Walleye & Northern Pike" & spec == "WAE" ~ "Both - Walleye",
-                             species == "Walleye & Northern Pike" & spec == "NOP" ~ "Both - Northern Pike",
-                             species == "Northern Pike" ~ "Northern Pike",
-                             species == "Walleye" ~ "Walleye"))
 
 #simple map showing lake locations by species 
 mn_map <- ggplot() +
@@ -601,11 +649,9 @@ mn_map <- ggplot() +
   
   # Plot lakes with centroids
   geom_sf(data = lakes_sf, 
-          aes(color = zm_lake, 
-              shape = species_simp),
+          aes(color = zm_lake),
           size = 3) +
   scale_color_manual("Invasion Status of Lake", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
-  scale_shape_manual("Species Sampled", values = c(1, 3, 10)) +
   # Remove gridlines and set white background
   theme_minimal() +
   theme(panel.background = element_rect(fill = "white", color = NA),
@@ -613,8 +659,11 @@ mn_map <- ggplot() +
         legend.position = c(.79, .4),
          legend.box.background = element_rect(color = "black", size = 0.5),
         legend.key.size = unit(.2, "cm")) +
-  annotation_scale(location = "tl") +
-  annotation_north_arrow(location = "br", which_north = "true")
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "br", 
+                         which_north = "true",
+                         pad_x = unit(0.55, "cm"),
+                         pad_y = unit(0.7, "cm"))
 mn_map
 ggsave("BACI_lakes_map.jpg", height = 7, width = 7, dpi = 600, bg = "white")
 
@@ -631,23 +680,350 @@ inset_y <- 0.8
 inset_width <- 0.22
 inset_height <- 0.15
 
-ggdraw(mn_map) +
+mn_map_total <- ggdraw(mn_map) +
   draw_plot(us_map, x = 0.7, y = 0.76, width = 0.22, height = 0.22) +
   draw_line(x = c(inset_x, inset_x + inset_width), y = c(inset_y, inset_y), color = "black", size = 1) +  
   draw_line(x = c(inset_x, inset_x + inset_width), y = c(inset_y + inset_height, inset_y + inset_height), color = "black", size = 1) +  
   draw_line(x = c(inset_x, inset_x), y = c(inset_y, inset_y + inset_height), color = "black", size = 1) +  
   draw_line(x = c(inset_x + inset_width, inset_x + inset_width), y = c(inset_y, inset_y + inset_height), color = "black", size = 1)  
+mn_map_total
 ggsave("BACI_lakes_map_inset.jpg", height = 7, width = 7, dpi = 600, bg = "white")
 
+########################species specific maps############################
+lake_locs_spec <- combined_data %>% 
+  distinct(spec, dow, waterway, centroid_lat, centroid_lon, zm_lake) %>% 
+  mutate(species = as.factor(case_when(spec == "NOP" ~ "Northern Pike",
+                             spec == "WAE" ~ "Walleye",
+                             spec == "BLG" ~ "Bluegill",
+                             spec == "BLC" ~ "Black Crappie",
+                             spec == "YEP" ~ "Yellow Perch",
+                             spec == "LMB" ~ "Largemouth Bass",
+                             TRUE ~ spec)),
+         species = factor(species, levels = c("Northern Pike",
+                                              "Walleye",
+                                              "Largemouth Bass",
+                                              "Black Crappie",
+                                              "Yellow Perch",
+                                              "Bluegill")))
 
+#make sf objects
+lakes_sf <- st_as_sf(lake_locs_spec, coords = c("centroid_lon", "centroid_lat"), crs = 4326)
+
+mn_map <- states(cb = T) %>% 
+  filter(STUSPS == "MN")
+
+minnesota_sf <- st_as_sf(mn_map)
+rm(mn_map)
+
+species_images <- lake_locs_spec %>%
+  group_by(species) %>%
+  summarise(y = max(centroid_lat, na.rm = TRUE) * 1.02,  # Slightly above the highest lake
+            x = max(centroid_lon, na.rm = TRUE) * 1.02) %>%  # Slightly to the right
+  mutate(img = case_when(
+    species == "Walleye" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"),
+    species == "Northern Pike" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"),
+    species == "Largemouth Bass" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"),
+    species == "Black Crappie" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+    species == "Yellow Perch" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+    species == "Bluegill" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")
+  ),
+  y = 49,
+  x = -91)  
+
+
+#simple map showing lake locations by species 
+mn_map_spec <- ggplot() +
+  # Plot Minnesota state
+  geom_sf(data = minnesota_sf, fill = "white", color = "black") +
+  
+  # Plot lakes with centroids
+  geom_sf(data = lakes_sf, 
+          aes(color = zm_lake),
+          size = 2) +
+  scale_color_manual("Invasion Status of Lake", values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+  # Remove gridlines and set white background
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid = element_blank(),
+        #legend.position = c(.79, .4),
+        legend.position = "none",
+         legend.box.background = element_rect(color = "black", size = 0.5),
+        legend.key.size = unit(.2, "cm"),
+        strip.background = element_rect(color = "black", fill = NA, linewidth  = 0.5),
+    strip.text = element_text(face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5) 
+        ) +
+  # annotation_scale(location = "br") +
+  # annotation_north_arrow(location = "br", 
+  #                        which_north = "true",
+  #                        pad_x = unit(0.55, "cm"),
+  #                        pad_y = unit(0.7, "cm")) +
+  facet_wrap(~ species)
+mn_map_spec
+
+mn_map_icons <- mn_map_spec +
+  geom_image(data = species_images, aes(x = x, y = y, image = img), size = 0.3) +
+  ylab("") +
+  xlab("")
+mn_map_icons
+ggsave("map_spec_icons.jpg", width = 7, height = 5, dpi = 600)
+
+#########################combined maps#######################################
+combined_map <- mn_map_total / mn_map_icons+
+  plot_layout(heights = c(1.7, 1))
+combined_map
+ggsave("combined_maps.jpg", width = 5, height = 7, dpi = 600)
+
+#############remove objects######################
 rm(lake_summary, lakes_sf, minnesota_sf, spec, inset_height, inset_width, inset_x, inset_y, mn_map, us_sf, us_map)
 ```
+
+# Probability of exceedance 
+```{r}
+length_ranges <- combined_data %>%
+  group_by(spec) %>% 
+  summarize(min_length = min(scaled_length),
+            max_length = max(scaled_length))
+
+length_seq <- length_ranges %>% 
+  rowwise() %>% 
+  mutate(scaled_length = list(seq(min_length, max_length, length.out = 100))) %>% 
+  unnest(cols = c(scaled_length))
+rm(length_ranges)
+
+length.stats <- combined_data %>%
+  group_by(spec) %>% 
+  summarise(mean.length=mean(lgthmm), sd.length=sd(lgthmm), min.length=min(lgthmm), max.length=max(lgthmm))
+
+pred_data <- expand_grid(spec = unique(length_seq$spec),
+                         zm_lake = c("y", "n"),
+                         zm_sample_lag_2 = c("y", "n")) %>% 
+  left_join(length_seq, by = "spec")
+
+get_prob_exceed_spec <- function(spec_filter, fit_model, pred_data, length_stats) {
+  pred_data_spec <- pred_data %>% 
+    filter(spec == spec_filter)
+  
+  length_stats_spec <- length_stats %>% 
+    filter(spec == spec_filter)
+  
+  print(paste("Glancing at filtered pred_data_spec for species:", spec_filter))
+  glimpse(pred_data_spec) 
+  
+  print(paste("Glancing at filtered length_stats_spec for species:", spec_filter))
+  glimpse(length_stats_spec) 
+  
+  print(paste("checking selected model fit:", spec_filter))
+  print(summary(fit_model))
+  
+  mean_length <- length_stats_spec$mean.length
+  sd_length <- length_stats_spec$sd.length
+  
+  prob_exceed <- fit_model %>% 
+    add_predicted_draws(newdata = pred_data_spec, re_formula = NA) %>% 
+    mutate(mean_length = mean_length,
+           sd_length = sd_length,
+           lgthmm = (scaled_length * sd_length) + mean_length,
+           is_above_threshold = .prediction > log(0.22)) %>% 
+    group_by(zm_lake, zm_sample_lag_2, lgthmm) %>% 
+    summarise(prob = mean(is_above_threshold), .groups = "drop") %>% 
+    mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
+                               zm_lake == "n" ~ "Reference"
+                               ),
+           spec = spec_filter) 
+  return(prob_exceed)
+}
+
+wae_pred <- pred_data %>% 
+  filter(spec == "WAE")
+check <- fit_wae %>% 
+  add_predicted_draws(newdata = wae_pred, re_formula = NA)  %>% 
+  mutate(invasion = paste0(zm_lake, zm_sample_lag_2)) %>% 
+  select(invasion, scaled_length, .draw, .prediction) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = c(.draw, scaled_length),names_from = invasion,values_from = .prediction) %>% 
+  mutate(correction = ny - nn,
+         yy_corrected = yy-correction)
+
+#############4/1 - stopped here####################
+#I am really close - next steps
+#add in background correction to zm invasion
+#run the function for all spec
+#create plot of before and after with background correction with icons
+#then move onto ppm vs length 
+
+
+#walleye
+wae_exceed <- get_prob_exceed_spec(spec_filter = "WAE", 
+                                   fit_model = fit_wae, 
+                                   pred_data = pred_data,
+                                   length_stats = length.stats)
+#pike
+nop_exceed <- get_prob_exceed_spec(spec = "NOP", 
+                                   fit_model = fit_nop, 
+                                   pred_data = pred_data,
+                                   length_stats = length.stats)
+#bluegill
+blg_exceed <- get_prob_exceed_spec(spec = "BLG", 
+                                   fit_model = fit_blg, 
+                                   pred_data = pred_data,
+                                   length_stats = length.stats)
+#crappie
+blc_exceed <- get_prob_exceed_spec(spec = "BLC", 
+                                   fit_model = fit_blc, 
+                                   pred_data = pred_data,
+                                   length_stats = length.stats)
+#largemouth
+lmb_exceed <- get_prob_exceed_spec(spec = "LMB", 
+                                   fit_model = fit_lmb, 
+                                   pred_data = pred_data,
+                                   length_stats = length.stats)
+
+#perch
+yep_exceed <- get_prob_exceed_spec(spec = "YEP", 
+                                   fit_model = fit_yep, 
+                                   pred_data = pred_data,
+                                   length_stats = length.stats)
+
+combined_exceed <- bind_rows(wae_exceed, 
+                             nop_exceed,
+                             yep_exceed,
+                             blg_exceed,
+                             blc_exceed,
+                             lmb_exceed)
+
+
+ggplot() +
+  geom_line(data = combined_exceed, aes(x = lgthmm, y = prob, color = zm_sample_lag_2)) + 
+  #geom_point(data = vert_line, aes(x =lgthmm, y = prob, color = zm_sample_lag_2)) +
+  #geom_line(data = vert_line, aes(x = lgthmm, y = prob, group = zm_lake)) +
+  facet_grid(spec~zm_lake, scales = "free_x") +
+  scale_colour_manual(values=c("#00CCCC", "#FF6666"), labels=c("Before", "After")) +
+  ylim(c(-0.01,1.01)) +
+  xlab("Length (mm)") +
+  ylab("Probability of Exceeding 0.22 ppm") +
+  theme_bw() +
+  theme(strip.background = element_blank(), 
+        legend.position = "bottom", 
+        legend.title = element_blank(), 
+        legend.background = element_blank(), 
+        panel.grid = element_blank(), 
+        strip.text = element_text(size = 13))
+
+
+
+pred_lengths <- fit_nop %>% 
+  add_predicted_draws(newdata = pred_data, re_formula = NA) %>% 
+  mutate(mean_length = length.stats$mean.length,
+         sd_length = length.stats$sd.length) %>% 
+  mutate(lgthmm =(scaled_length*sd_length)+mean_length) %>% 
+  group_by(zm_lake, zm_sample_lag_2, lgthmm) %>% 
+  summarise(median=median(exp(.prediction)), lci=quantile(exp(.prediction), .025), uci=quantile(exp(.prediction), 0.975)) %>% 
+  mutate(smoothed_uci = predict(loess(uci ~ lgthmm, span = 0.5)),
+         smoothed_lci = predict(loess(lci ~ lgthmm, span = 0.5)),
+         smoothed_median = predict(loess(median ~ lgthmm, span = 0.5))) %>%
+  ungroup() %>% 
+  mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
+                             zm_lake == "n" ~ "Reference"))
+
+#prob of exceed stats and plot
+#24 inch fish
+prob_exceed %>% 
+  mutate(distance = abs(lgthmm - 610)) %>% 
+  filter(distance == min(distance)) %>%
+  select(zm_lake, zm_sample_lag_2, lgthmm, prob, distance) %>% 
+  write_csv("nop_prob_exceeding_24_in.csv")
+
+#for each draw from the posterior, we generate a prediction based on length, zm_lake, and zm_sample
+#to get the probability of exceeding 0.22 ppm, we ask if the prediction is over 0.22. We then find the average # over vs the total for each length/zm
+#the slight dip at large values is a result of random noise in the drawing from the posterior and inconsequential to the result - ex. large lengths have larger variation in preiditon - increasing the chace that at least one value may end up smaller than 0.22ppm
+vert_line <- prob_exceed %>% 
+  mutate(distance = abs(lgthmm - 610)) %>% 
+  filter(distance == min(distance))
+
+pike_length_probs <- ggplot() +
+  geom_line(data = prob_exceed, aes(x = lgthmm, y = prob, color = zm_sample_lag_2)) + 
+  geom_point(data = vert_line, aes(x =lgthmm, y = prob, color = zm_sample_lag_2)) +
+  geom_line(data = vert_line, aes(x = lgthmm, y = prob, group = zm_lake)) +
+  facet_wrap(~zm_lake, scales = "free_x") +
+  scale_colour_manual(values=c("#00CCCC", "#FF6666"), labels=c("Before", "After")) +
+  ylim(c(-0.01,1.01)) +
+  xlab("Length (mm)") +
+  ylab("Probability of Exceeding 0.22 ppm") +
+  theme_bw() +
+  theme(strip.background = element_blank(), 
+        legend.position = "bottom", 
+        legend.title = element_blank(), 
+        legend.background = element_blank(), 
+        panel.grid = element_blank(), 
+        strip.text = element_text(size = 13)) 
+pike_length_probs
+ggsave("nop_baci_prob_exeeding_length.jpg", width = 11, height = 7, dpi = 600, bg = "white")
+
+pike_length_probs <- pike_length_probs +
+  theme(legend.position = "none",
+        axis.title.x = element_blank()) +
+  ylab("Probability of\nExceeding 0.22 (ppm)") 
+pike_length_probs
+
+pike_length_probs <- ggdraw(pike_length_probs) +
+  pike_outline
+pike_length_probs
+
+#length vs ppm plot
+pike_length_ppm <- ggplot() +
+  facet_wrap(~zm_lake, scales='free') +
+  theme_bw() +
+  geom_ribbon(data = pred_lengths, aes(x = lgthmm, y = median, color = zm_sample_lag_2, ymax = smoothed_uci, ymin = smoothed_lci, fill = zm_sample_lag_2), lwd = 0, alpha = .3) + # alpha is transparency
+  geom_line(data = pred_lengths, lwd = 1, aes(x = lgthmm, y = median, color = zm_sample_lag_2, lty = zm_sample_lag_2)) + # center line of ribbon
+  geom_point(data = nop_data %>% 
+               mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
+                             zm_lake == "n" ~ "Reference")), aes(x = lgthmm, y = hgppm, color = zm_sample_lag_2), alpha = .2) +
+  scale_linetype_manual(values = c(1, 6), labels = c("Before", "After")) + # to tell it which line type you want
+  scale_colour_manual(values = c("#00CCCC", "#FF6666"), labels = c("Before", "After")) +
+  scale_fill_manual(values = c("#00CCCC", "#FF6666"), labels = c("Before", "After")) +
+  ylab("Mercury Concentration (ppm)") +
+  xlab("Fish Length (mm)") +
+  labs(fill = "Invasion status", lty = "Invasion status", color = "Invasion status", labels = c("Before", "After")) +
+  geom_hline(yintercept = 0.22) +
+  theme(strip.background = element_blank(), 
+        legend.position = "bottom", 
+        legend.title = element_blank(), 
+        legend.background = element_blank(), 
+        panel.grid = element_blank(), 
+        strip.text = element_text(size = 13))
+pike_length_ppm
+ggsave("nop_length_ppm_invasion.jpg", width = 11, height = 7, dpi = 600)
+
+pike_length_ppm <- pike_length_ppm +
+  theme(legend.position = "none",
+        axis.title.x = element_blank())
+pike_length_ppm
+
+pike_length_ppm <- ggdraw(pike_length_ppm) +
+  pike_outline
+pike_length_ppm
+
+#stat for when fish cross the line?
+pred_lengths %>% 
+  mutate(distance = abs(median - 0.22)) %>% 
+  group_by(zm_lake, zm_sample_lag_2) %>% 
+  filter(distance == min(distance)) %>%
+  select(zm_lake, zm_sample_lag_2, lgthmm) %>% 
+  pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+              values_from = lgthmm) %>% 
+  mutate(percent_change_reference = ((Reference_y - Reference_n)/Reference_n)*100,
+         percent_change_zm = ((`Zebra Mussel_y` - `Zebra Mussel_n`)/`Zebra Mussel_n`)*100,
+         diff_of_change = percent_change_zm - percent_change_reference) %>% 
+  write_csv("nop_percent_change_crossing_lengths.csv")
+
+rm(pred_lengths, pred_data)
+```
+
 
 # Data Coverage Stats
 ```{r}
 #stats for the singular model run of 2 lag years ref and zm with matching
-combined_data <- bind_rows(nop_data, wae_data)
-
 lakes <- combined_data %>% 
   group_by(spec, zm_lake, zm_sample_lag_2) %>% 
   summarise(n_lakes = n_distinct(dow),
@@ -702,43 +1078,13 @@ combined_data %>%
   group_by(zm_lake) %>% 
   summarise(n_distinct(dow))
 
-#other species?
-blg_data <- create_species_data(species = "BLG", data = hg.model, lag_variable = "zm_sample_lag_2")
-blg_data %>% 
-  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
-  summarise(n_lakes = n_distinct(dow),
-            n_years = n_distinct(yearcoll),
-            n_samples = n()) %>% 
-  print(n = nrow(.))
-blg_data %>% 
-  filter(zm_lake == "y") %>% 
-  group_by(waterway, zm_sample_lag_2) %>% 
-  count() %>% 
-  print(n = nrow(.))
+combined_data %>% 
+  group_by(spec, zm_lake) %>% 
+  summarise(n_distinct(dow))
 
-lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
-lmb_data %>% 
-  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
-  summarise(n_lakes = n_distinct(dow),
-            n_years = n_distinct(yearcoll),
-            n_samples = n()) %>% 
-  print(n = nrow(.))
-blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable = "zm_sample_lag_2")
-blc_data %>% 
-  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
-  summarise(n_lakes = n_distinct(dow),
-            n_years = n_distinct(yearcoll),
-            n_samples = n()) %>% 
-  print(n = nrow(.))
-yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
-yep_data %>% 
-  group_by(spec, zm_lake, zm_sample_lag_2) %>% 
-  summarise(n_lakes = n_distinct(dow),
-            n_years = n_distinct(yearcoll),
-            n_samples = n()) %>% 
-  print(n = nrow(.))
-rm(blc_data, blg_data, lmb_data, yep_data)
 ```
+
+################ all three below need to be updated to the data################
 
 # Elapsed time summaries
 ```{r}
