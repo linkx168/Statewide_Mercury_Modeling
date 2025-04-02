@@ -39,7 +39,7 @@ fixlakeid <- function(lakeid){
 # Data - already filtered 
 *data below the LOD was already cut in half*
 ```{r}
-combined_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
+combined_data <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
 
 #break out for each species
 wae_data <- combined_data %>% 
@@ -123,12 +123,12 @@ fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + 
 
 #saved model runs
 ```{r}
-fit_wae <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
-fit_nop <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
-fit_blg <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
-fit_lmb <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
-fit_yep <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
-fit_blc <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
+fit_wae <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
+fit_nop <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
+fit_blg <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
+fit_lmb <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
+fit_yep <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
+fit_blc <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
 ```
 
 ######### Analysis #####################
@@ -787,7 +787,7 @@ length_ranges <- combined_data %>%
 
 length_seq <- length_ranges %>% 
   rowwise() %>% 
-  mutate(scaled_length = list(seq(min_length, max_length, length.out = 100))) %>% 
+  mutate(scaled_length = list(seq(min_length, max_length, length.out = 200))) %>% 
   unnest(cols = c(scaled_length))
 rm(length_ranges)
 
@@ -798,8 +798,9 @@ length.stats <- combined_data %>%
 pred_data <- expand_grid(spec = unique(length_seq$spec),
                          zm_lake = c("y", "n"),
                          zm_sample_lag_2 = c("y", "n")) %>% 
-  left_join(length_seq, by = "spec")
-
+  left_join(length_seq, by = "spec") %>% 
+  ungroup()
+    
 get_prob_exceed_spec <- function(spec_filter, fit_model, pred_data, length_stats) {
   pred_data_spec <- pred_data %>% 
     filter(spec == spec_filter)
@@ -821,29 +822,20 @@ get_prob_exceed_spec <- function(spec_filter, fit_model, pred_data, length_stats
   
   prob_exceed <- fit_model %>% 
     add_predicted_draws(newdata = pred_data_spec, re_formula = NA) %>% 
+    mutate(invasion = paste0(zm_lake, zm_sample_lag_2)) %>% 
     mutate(mean_length = mean_length,
            sd_length = sd_length,
            lgthmm = (scaled_length * sd_length) + mean_length,
            is_above_threshold = .prediction > log(0.22)) %>% 
-    group_by(zm_lake, zm_sample_lag_2, lgthmm) %>% 
+    group_by(invasion, lgthmm) %>% 
     summarise(prob = mean(is_above_threshold), .groups = "drop") %>% 
-    mutate(zm_lake = case_when(zm_lake == "y" ~ "Zebra Mussel",
-                               zm_lake == "n" ~ "Reference"
-                               ),
-           spec = spec_filter) 
+    mutate(spec = spec_filter) %>% 
+    pivot_wider(id_cols = lgthmm, names_from = invasion, values_from = prob) %>% 
+    mutate(yy_adjusted = yy - (ny - nn)) %>% 
+    pivot_longer(cols = c(yy, ny, nn, yn, yy_adjusted), names_to = "invasion", values_to = "prob") %>% 
+    mutate(species = spec_filter)
   return(prob_exceed)
 }
-
-wae_pred <- pred_data %>% 
-  filter(spec == "WAE")
-check <- fit_wae %>% 
-  add_predicted_draws(newdata = wae_pred, re_formula = NA)  %>% 
-  mutate(invasion = paste0(zm_lake, zm_sample_lag_2)) %>% 
-  select(invasion, scaled_length, .draw, .prediction) %>% 
-  ungroup() %>% 
-  pivot_wider(id_cols = c(.draw, scaled_length),names_from = invasion,values_from = .prediction) %>% 
-  mutate(correction = ny - nn,
-         yy_corrected = yy-correction)
 
 #############4/1 - stopped here####################
 #I am really close - next steps
@@ -892,13 +884,17 @@ combined_exceed <- bind_rows(wae_exceed,
                              blc_exceed,
                              lmb_exceed)
 
+exceed_plot <- combined_exceed %>% 
+  filter(invasion %in% c("yy_adjusted", "yn")) %>% 
+  mutate(invasion = case_when(invasion == "yy_adjusted" ~ "yy",
+                              TRUE ~ invasion))
 
 ggplot() +
-  geom_line(data = combined_exceed, aes(x = lgthmm, y = prob, color = zm_sample_lag_2)) + 
-  #geom_point(data = vert_line, aes(x =lgthmm, y = prob, color = zm_sample_lag_2)) +
+  geom_line(data = exceed_plot, aes(x = lgthmm, y = prob, color = invasion)) + 
+  #geom_point(data = vert_line, aes(x =lgthmm, y = prob, color = impact)) +
   #geom_line(data = vert_line, aes(x = lgthmm, y = prob, group = zm_lake)) +
-  facet_grid(spec~zm_lake, scales = "free_x") +
-  scale_colour_manual(values=c("#00CCCC", "#FF6666"), labels=c("Before", "After")) +
+  facet_grid(~species, scales = "free_x") +
+  #scale_colour_manual(values=c("#00CCCC", "#FF6666"), labels=c("Before", "After")) +
   ylim(c(-0.01,1.01)) +
   xlab("Length (mm)") +
   ylab("Probability of Exceeding 0.22 ppm") +
