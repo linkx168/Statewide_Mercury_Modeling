@@ -1246,7 +1246,13 @@ combined_data %>%
 
 ```
 
-################ all three below need to be updated to the data################
+# Model summaries 
+```{r}
+
+```
+
+
+################below need to be updated to the data################
 
 # Elapsed time summaries
 ```{r}
