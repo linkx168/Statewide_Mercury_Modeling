@@ -39,7 +39,7 @@ fixlakeid <- function(lakeid){
 # Data - already filtered 
 *data below the LOD was already cut in half*
 ```{r}
-combined_data <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
+combined_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
 
 #break out for each species
 wae_data <- combined_data %>% 
@@ -123,12 +123,12 @@ fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + 
 
 #saved model runs
 ```{r}
-fit_wae <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
-fit_nop <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
-fit_blg <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
-fit_lmb <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
-fit_yep <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
-fit_blc <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
+fit_wae <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
+fit_nop <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
+fit_blg <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
+fit_lmb <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
+fit_yep <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
+fit_blc <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
 ```
 
 ######### Analysis #####################
@@ -1235,6 +1235,11 @@ combined_data %>%
   count() %>% 
   print(n = nrow(.))
 
+combined_data %>% 
+  summarise(n_lod = sum(hgcode == "K", na.rm = T),
+            n_total = n(),
+            percent_lod = (n_lod/n_total)*100)
+
 #how many unique lakes across species
 combined_data %>% 
   group_by(zm_lake) %>% 
@@ -1244,11 +1249,17 @@ combined_data %>%
   group_by(spec, zm_lake) %>% 
   summarise(n_distinct(dow))
 
-```
+combined_data %>% 
+  group_by(spec) %>% 
+  summarise(n_distinct(dow))
 
-# Model summaries 
-```{r}
+combined_data %>% 
+  summarise(n_distinct(dow))
 
+#how many samples across lake types?
+combined_data %>% 
+  group_by(zm_lake) %>% 
+  count()
 ```
 
 
