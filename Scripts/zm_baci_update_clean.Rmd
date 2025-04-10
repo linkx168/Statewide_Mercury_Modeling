@@ -39,7 +39,7 @@ fixlakeid <- function(lakeid){
 # Data - already filtered 
 *data below the LOD was already cut in half*
 ```{r}
-combined_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
+combined_data <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "combined_hg_data.csv"))
 
 #break out for each species
 wae_data <- combined_data %>% 
@@ -123,12 +123,12 @@ fit_yep <- brm(log(hgppm) ~ scaled_length + zm_lake*zm_sample_lag_2 + (1|dow) + 
 
 #saved model runs
 ```{r}
-fit_wae <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
-fit_nop <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
-fit_blg <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
-fit_lmb <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
-fit_yep <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
-fit_blc <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
+fit_wae <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
+fit_nop <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
+fit_blg <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
+fit_lmb <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
+fit_yep <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
+fit_blc <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
 ```
 
 ######### Analysis #####################
@@ -272,6 +272,24 @@ diff_lakes <- contrasts_draws %>%
                    values_to = "value") %>% 
       mutate(zm_lake = case_when(zm_lake == "diff_zm" ~ "Zebra Mussel",
                                  TRUE ~ "Uninvaded"))
+
+#percent_change_stat
+percent_change<- marginal_effects_all %>% 
+  select(-.chain, -.iteration, -standard_length) %>%
+  group_by(species, .draw) %>% 
+      pivot_wider(names_from = c(zm_lake, zm_sample_lag_2),
+                  values_from = c(.value, hg_ppm)) %>% 
+  mutate(correction = hg_ppm_n_y - hg_ppm_n_n,
+         hg_ppm_y_y_corrected = hg_ppm_y_y - correction,
+         before = hg_ppm_y_n,
+         after = hg_ppm_y_y_corrected,
+         raw_change = after - before,
+         percent_change = ((after - before)/before)*100) %>% 
+  select(species, before, after, raw_change, percent_change, .draw) %>% 
+  group_by(species) %>% 
+  median_qi()
+# write_csv(percent_change, "percent_change_marginal_effects.csv")
+rm(percent_change)
 ```
 
 # marginal effects plots
@@ -433,6 +451,14 @@ plot2_icons
 combined_plot <-  plot2 + plot1 
 combined_plot
 #ggsave("baci_and_diff.jpg", height = 5, width = 9)
+
+#quick look at marginal effects distributions 
+# marginal_effects_all %>% 
+#   mutate(interaction = paste0(zm_lake, zm_sample_lag_2)) %>% 
+#   ggplot() +
+#   geom_density(aes(x = hg_ppm, fill = interaction), alpha = .4) +
+#   scale_fill_manual(values = c("lightblue", "navy", "pink", "red")) +
+#   facet_wrap(~species, scales = "free")
 ```
 
 # fish meals metric
@@ -552,28 +578,38 @@ meals1 <- discount %>%
 meals1
 
 species_images <- data.frame(
-  species = c("Walleye", 
-              "Northern Pike", 
+  species = as.factor(c("Northern Pike",
+                        "Walleye", 
               "Largemouth Bass", 
               "Black Crappie",
               "Yellow Perch", 
-              "Bluegill"),
-  img = c(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
+              "Bluegill")),
+  img = c(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
   x = 1.5,
-  y = c(6.5, 4.25, 9, 18, 40, 27)
-)
+  y = c(4.25, 6.5, 9, 18, 40, 27)
+) 
 
 meals_icons <- meals1 + 
   geom_image(data = species_images, aes(y = y, x = x, image = img), size = .3, inherit.aes = F)
 meals_icons
-ggsave("diff_meals.jpg", height = 5, width = 7, units = "in", dpi = 600)
+# ggsave("diff_meals.jpg", height = 5, width = 7, units = "in", dpi = 600)
 
-rm(marg_draw_plot, sum_meals, marginal_effects_all, discount)
+# stat summaries 
+meals_sum <- discount %>% 
+  select(species, .draw, interaction, safe_consumption_month) %>% 
+  pivot_wider(id_cols = c(species, .draw),names_from = interaction,values_from = safe_consumption_month) %>% 
+  group_by(species) %>% 
+  mutate(diff_meals = After - Before,
+         percent_change_meals = ((After-Before)/Before)*100) %>% 
+  median_qi()
+# write_csv(meals_sum, "meals_summary_stats.csv")
+
+rm(marg_draw_plot, sum_meals, marginal_effects_all, discount, meals_sum)
 
 ###############code below to make for each level of the baci#################
 #lets use those marginal effects to calculate this - and keep track of our units as we go
@@ -960,6 +996,17 @@ prob_plot_icons <- prob_plot +
 prob_plot_icons
 ggsave("prob_exceed.jpg", height = 5, width = 7, dpi = 600)
 
+#summary stats 
+prob_exceed_stats <- vert_line %>% 
+  select(species, invasion, prob) %>% 
+  pivot_wider(id_cols = c(species),names_from = invasion,values_from = prob) %>% 
+  mutate(after = yy,
+         before = yn,
+         diff = after - before,
+         percent_diff = ((after-before)/before) * 100) %>% 
+  select(-yn, -yy) 
+# write_csv(prob_exceed_stats, "prob_exceed_stats.csv")
+
 rm(nop_exceed,
    wae_exceed,
    lmb_exceed,
@@ -971,7 +1018,8 @@ rm(nop_exceed,
    prob_plot,
    prob_plot_icons,
    species_images,
-   exceed_plot)
+   exceed_plot,
+   prob_exceed_stats)
 
 ########################ppm vs length###################################
 get_expected_hgppm <- function(spec_filter, fit_model, pred_data, length_stats) {
@@ -1159,16 +1207,34 @@ ggsave("hgppm_raw_predicted_lines.jpg", width = 7, height = 5)
 
 
 #stat for when fish cross the line?
-combined_expect %>% 
+median <- combined_expect %>% 
   mutate(distance = abs(median - 0.22)) %>% 
   group_by(invasion, species) %>% 
   filter(distance == min(distance)) %>%
   select(species, lgthmm, invasion) %>% 
   pivot_wider(names_from = c(invasion),
               values_from = lgthmm) %>% 
-  mutate(percent_change_zm = ((yy-yn)/yn)*100,
-         diff = yy-yn) %>% 
-  write_csv("percent_change_crossing_lengths.csv")
+  mutate(percent_change_med = ((yy-yn)/yn)*100,
+         diff_med = yy-yn) %>% 
+  pivot_longer(cols = c(yy, yn),names_to = "invasion",values_to = "lgthmm_med")
+
+distance <- combined_expect %>% 
+  mutate(distance_uci = abs(uci -0.22),
+         distance_lci = abs(lci - 0.22))
+lower <- distance %>% 
+  group_by(species, invasion) %>% 
+  filter(distance_lci == min(distance_lci)) %>% 
+  select(species, invasion, lgthmm_uci = lgthmm)
+upper <- distance %>% 
+  group_by(species, invasion) %>% 
+  filter(distance_uci == min(distance_uci)) %>% 
+  select(species, invasion, lgthmm_lci = lgthmm)
+length_22 <- median %>% 
+  left_join(lower, by = c("species", "invasion")) %>% 
+  left_join(upper, by = c("species", "invasion")) %>% 
+  select(species, invasion, lgthmm_lci, lgthmm_med, lgthmm_uci, diff_med, percent_change_med)
+write_csv(length_22, "length_crossing.csv")
+
 
 rm(pred_data,
    nop_expect,
@@ -1180,7 +1246,11 @@ rm(pred_data,
    hgppm_plot_icons,
    hgppm_plot,
    combined_expect,
-   species_images)
+   species_images,
+   upper,
+   lower,
+   median,
+   length_22)
 ```
 
 # Data Coverage Stats
