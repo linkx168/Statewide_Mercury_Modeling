@@ -38,7 +38,7 @@ fixlakeid <- function(lakeid){
 # Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -69,7 +69,7 @@ hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
@@ -88,7 +88,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -353,6 +353,8 @@ hg.model %>%
 #pre lake grouping filtering (removing small fish and dealing with fish @ the LOD)
 hg.model <- hg.model %>% 
   filter(lgthin >= 5) %>% 
+  filter(!(spec == "BLG" & lgthin > 20)) %>% 
+  filter(!(spec == "BLC" & lgthin > 20)) %>% 
   mutate(hgppm = case_when(hgcode == "K" ~ hgppm*0.5,
                            TRUE ~ hgppm))
 
@@ -511,11 +513,11 @@ blg_data <- create_species_data(species = "BLG", data = hg.model, lag_variable =
 blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable = "zm_sample_lag_2")
 lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
 yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
-#wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
+# wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
 
 
 # Define species list and lagged variable names (including non-lagged "zm_sample")
-species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP", "WTS")
+species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP")
 lag_variables <- c(paste0("zm_sample_lag_", 0:5))
 
 # Loop through all combinations
@@ -529,6 +531,86 @@ for (species in species_list) {
     print(paste("Created:", object_name))  # Print progress
   }
 }
+
+all_lags_samples <- bind_rows(BLC_zm_sample_lag_0,
+                              BLC_zm_sample_lag_1,
+                              BLC_zm_sample_lag_2,
+                              BLC_zm_sample_lag_3,
+                              BLC_zm_sample_lag_4,
+                              BLC_zm_sample_lag_5,
+                              BLG_zm_sample_lag_0,
+                              BLG_zm_sample_lag_1,
+                              BLG_zm_sample_lag_2,
+                              BLG_zm_sample_lag_3,
+                              BLG_zm_sample_lag_4,
+                              BLG_zm_sample_lag_5,
+                              LMB_zm_sample_lag_0,
+                              LMB_zm_sample_lag_1,
+                              LMB_zm_sample_lag_2,
+                              LMB_zm_sample_lag_3,
+                              LMB_zm_sample_lag_4,
+                              LMB_zm_sample_lag_5,
+                              NOP_zm_sample_lag_0,
+                              NOP_zm_sample_lag_1,
+                              NOP_zm_sample_lag_2,
+                              NOP_zm_sample_lag_3,
+                              NOP_zm_sample_lag_4,
+                              NOP_zm_sample_lag_5,
+                              WAE_zm_sample_lag_0,
+                              WAE_zm_sample_lag_1,
+                              WAE_zm_sample_lag_2,
+                              WAE_zm_sample_lag_3,
+                              WAE_zm_sample_lag_4,
+                              WAE_zm_sample_lag_5,
+                              YEP_zm_sample_lag_0,
+                              YEP_zm_sample_lag_1,
+                              YEP_zm_sample_lag_2,
+                              YEP_zm_sample_lag_3,
+                              YEP_zm_sample_lag_4,
+                              YEP_zm_sample_lag_5
+                              )
+glimpse(all_lags_samples)
+
+all_lags_samples <- all_lags_samples %>% 
+  mutate(lag = case_when(!is.na(zm_sample_lag_0) ~ "0",
+                         !is.na(zm_sample_lag_1) ~ "1",
+                         !is.na(zm_sample_lag_2) ~ "2",
+                         !is.na(zm_sample_lag_3) ~ "3",
+                         !is.na(zm_sample_lag_4) ~ "4",
+                         !is.na(zm_sample_lag_5) ~ "5"),
+         zm_sample = case_when(!is.na(zm_sample_lag_0) ~ zm_sample_lag_0,
+                               !is.na(zm_sample_lag_1) ~ zm_sample_lag_1,
+                               !is.na(zm_sample_lag_2) ~ zm_sample_lag_2,
+                               !is.na(zm_sample_lag_3) ~ zm_sample_lag_3,
+                               !is.na(zm_sample_lag_4) ~ zm_sample_lag_4,
+                               !is.na(zm_sample_lag_5) ~ zm_sample_lag_5))
+
+zm_baci_clean <- all_lags_samples %>% 
+  rename(lake_name = waterway,
+         lake_id = dow,
+         year = yearcoll,
+         species = spec,
+         sample_type = anathg,
+         ) %>% 
+  select(-type,
+         -lgthmm,
+         -scaled_length,
+         -zm_sample_lag_0,
+         -zm_sample_lag_1,
+         -zm_sample_lag_2,
+         -zm_sample_lag_3,
+         -zm_sample_lag_4,
+         -zm_sample_lag_5)
+
+glimpse(zm_baci_clean)
+
+zm_baci_clean %>% 
+  filter(lag == 2) %>% 
+  group_by(sample_type, species, zm_lake) %>% 
+  count() %>% 
+  arrange(species) %>% 
+  print(n = nrow(.))
+write_csv(zm_baci_clean, "baci_data_29april2025.csv")
 ```
 
 
