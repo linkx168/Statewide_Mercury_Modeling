@@ -32,7 +32,6 @@ fixlakeid <- function(lakeid){
   lakeid[nchar(lakeid) == 7] = paste0("0", lakeid[nchar(lakeid) == 7]) # this line specifies to paste a leading zero only onto those values with 7 characters
   lakeid # r will, by default, return the last variable in the body
 }
-
 ```
 
 # Data
@@ -515,7 +514,6 @@ lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable =
 yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
 # wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
 
-
 # Define species list and lagged variable names (including non-lagged "zm_sample")
 species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP")
 lag_variables <- c(paste0("zm_sample_lag_", 0:5))
@@ -601,6 +599,11 @@ zm_baci_clean <- all_lags_samples %>%
          -zm_sample_lag_3,
          -zm_sample_lag_4,
          -zm_sample_lag_5)
+
+zm_baci_clean %>% 
+  filter(species %in% c("WAE", "YEP") & lag == "2") %>% 
+  group_by(species, zm_lake, zm_sample) %>% 
+  count()
 
 glimpse(zm_baci_clean)
 
