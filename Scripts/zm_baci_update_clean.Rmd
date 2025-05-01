@@ -52,6 +52,8 @@ all_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PR
   group_by(species, lag) %>% 
   mutate(scaled_length = c(scale(lgthmm))) %>% 
   ungroup()
+
+glimpse(all_data)
   
 #creating separate subsets for each species for fitting models. We first filter for species and then filter for the lag year of 2 subset
 wae_data <- all_data %>% 

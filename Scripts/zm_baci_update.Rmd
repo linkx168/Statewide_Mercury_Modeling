@@ -168,7 +168,8 @@ hg.model <- hg %>%
          lake_lat_decdeg,
          lake_lon_decdeg,
          easting,
-         northing) %>% 
+         northing,
+         SAMPLENO) %>% 
   mutate(zm_infested_lag_1 = Year_Infested +1,
          zm_infested_lag_2 = Year_Infested +2,
          zm_infested_lag_3 = Year_Infested +3,
@@ -498,7 +499,8 @@ create_species_data <- function(species, data, lag_variable) {
            zm_lake,
            year_infested,
            nearest_infested_year,
-           !!sym(lag_variable)
+           !!sym(lag_variable),
+           sampleno
            )
   #print(map)
   return(species_data)
@@ -589,6 +591,7 @@ zm_baci_clean <- all_lags_samples %>%
          year = yearcoll,
          species = spec,
          sample_type = anathg,
+         sample_id = sampleno
          ) %>% 
   select(-type,
          -lgthmm,
@@ -601,7 +604,7 @@ zm_baci_clean <- all_lags_samples %>%
          -zm_sample_lag_5)
 
 zm_baci_clean %>% 
-  filter(species %in% c("WAE", "YEP") & lag == "2") %>% 
+  filter(species %in% c("WAE", "YEP", "BLC", "NOP") & lag == "2") %>% 
   group_by(species, zm_lake, zm_sample) %>% 
   count()
 
