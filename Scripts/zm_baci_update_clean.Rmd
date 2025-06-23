@@ -36,16 +36,17 @@ fixlakeid <- function(lakeid){
 ```
 
 # Data 
-Here we read in the data that has already been filtered from the MN contaminate database. Filtering was done such that:
+Here we read in the data that has already been filtered from the MN contaminate database. Filtering steps were:
 1.) not to include fish below 125 mm
 2.) not to include bluegill and black crappie above 500 mm
 3.) samples that have at least one observation before and after impact 
      -impact of reference systems assigned the impact of the nearest zebra mussel lake 
-4.) samples reported at the limit of detection have been cut by 0.5 times their value
+4.) samples reported at the limit of detection were given 50% of the LOD value
 
-The filtered dataset includes 6 different "subsets" for sensitivity analysis in the chose of a lag year of the binary y/n zebra mussel impact term. We must filter the data for the appropriate filtered subset for the lag term we desire. We use the lag year of 2 for inference in this analysis and do a sensitivity analysis in that chose at the end of the markdown. 
+The filtered data set includes 6 different "subsets" for sensitivity analysis in the choice of how long of lag timing in creation of the binary y/n zebra mussel impact term. We must filter the data for the appropriate subset of data for the given lag term. We use the lag year of 2 for inference in this analysis, thus all species are filtered to ensure a lag year of 2 for the analysis. We include a sensitivity analysis at the bottom of the script, looping over all 6 lag timings for each species.  
 ```{r}
-all_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "baci_data_29april2025.csv")) %>% 
+#read in the data
+all_data <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "baci_data_29april2025.csv")) %>% 
   #create lengths in mm from inches
   mutate(lgthmm = lgthin/0.0393701) %>% 
   #group by species and lag analysis to scale length for modeling
@@ -55,7 +56,7 @@ all_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PR
 
 glimpse(all_data)
   
-#creating separate subsets for each species for fitting models. We first filter for species and then filter for the lag year of 2 subset
+#creating separate subsets for each species for fitting models. We first filter for species and then filter for the 2 year lag subset
 wae_data <- all_data %>% 
   filter(species == "WAE") %>% 
   filter(lag == "2")
@@ -80,7 +81,7 @@ yep_data <- all_data %>%
   filter(species == "YEP") %>% 
   filter(lag == "2")
 
-#creating a data frame of all lag year 2 samples used in later plotting
+#creating a data frame of all lag year 2 samples - used in plotting and exploration later
 combined_data <- bind_rows(wae_data,
                            nop_data,
                            blc_data,
@@ -92,7 +93,7 @@ combined_data <- bind_rows(wae_data,
 ###########Model fitting##################
 
 #Fit models
-Each individual species run separately for lag year 2, saved model runs can be read in below for convenience. 
+Each individual species run separately for 2 year lag term. Priors are set first to ensure constant priors across model fits. Saved model runs can be read in below for convenience. 
 ```{r}
 #set priors for all models so they are consistent across runs and not informed by the data
 priors <- c(prior(normal(1,100), class = Intercept),
@@ -154,12 +155,12 @@ rm(priors)
 
 #Saved model fits
 ```{r}
-fit_wae <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
-fit_nop <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
-fit_blg <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
-fit_lmb <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
-fit_yep <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
-fit_blc <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
+fit_wae <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_wae.rds"))
+fit_nop <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_nop.rds"))
+fit_blg <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blg.rds"))
+fit_lmb <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_lmb.rds"))
+fit_yep <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_yep.rds"))
+fit_blc <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Output", "baci_update_blc.rds"))
 ```
 
 ######### Analysis #####################
@@ -340,12 +341,12 @@ species_images <- data.frame(
               "Black Crappie",
               "Yellow Perch", 
               "Bluegill"),
-  img = c(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg"))
+  img = c(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg"))
 )
 
 diff_of_diff %>% 
@@ -470,12 +471,12 @@ species_images <- marg_draw_plot %>%
                                               "Black Crappie",
                                               "Yellow Perch",
                                               "Bluegill")),
-         img = case_when(species == "Walleye" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"),
-                         species == "Northern Pike" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"),
-                         species == "Largemouth Bass" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"),
-                         species == "Black Crappie" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
-                         species == "Yellow Perch" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
-                         species == "Bluegill" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
+         img = case_when(species == "Walleye" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"),
+                         species == "Northern Pike" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"),
+                         species == "Largemouth Bass" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"),
+                         species == "Black Crappie" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+                         species == "Yellow Perch" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+                         species == "Bluegill" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
          x = 1.5)
 
 plot2_icons <- plot2 +
@@ -622,12 +623,12 @@ species_images <- data.frame(
               "Black Crappie",
               "Yellow Perch", 
               "Bluegill")),
-  img = c(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
+  img = c(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
   x = 1.5,
   y = c(4.25, 6.5, 9, 18.9, 40, 22)
 ) 
@@ -797,12 +798,12 @@ species_images <- lake_locs_spec %>%
   summarise(y = max(centroid_lat, na.rm = TRUE) * 1.02,  # Slightly above the highest lake
             x = max(centroid_lon, na.rm = TRUE) * 1.02) %>%  # Slightly to the right
   mutate(img = case_when(
-    species == "Walleye" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"),
-    species == "Northern Pike" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"),
-    species == "Largemouth Bass" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"),
-    species == "Black Crappie" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
-    species == "Yellow Perch" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
-    species == "Bluegill" ~ file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")
+    species == "Walleye" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"),
+    species == "Northern Pike" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"),
+    species == "Largemouth Bass" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"),
+    species == "Black Crappie" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+    species == "Yellow Perch" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+    species == "Bluegill" ~ file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")
   ),
   y = 49,
   x = -91)  
@@ -1029,22 +1030,22 @@ species_images <- data.frame(
               "Black Crappie",
               "Yellow Perch", 
               "Bluegill")),
-  img = c(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
+  img = c(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
                     "Statewide mercury modeling", "Zebra Mussel Baci Analysis", 
                     "Data", "pike_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
                     "Statewide mercury modeling", "Zebra Mussel Baci Analysis", 
                     "Data", "walleye_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
                     "Statewide mercury modeling", "Zebra Mussel Baci Analysis", 
                     "Data", "largemouth_bass_outline.jpg"), 
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
                     "Statewide mercury modeling", "Zebra Mussel Baci Analysis", 
                     "Data", "crappie_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
                     "Statewide mercury modeling", "Zebra Mussel Baci Analysis", 
                     "Data", "perch_outline.jpg"),
-          file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", 
                     "Statewide mercury modeling", "Zebra Mussel Baci Analysis", 
                     "Data", "bluegill_outline.jpg")),
   x = c(350, 250, 250, 170, 155, 155),
@@ -1206,22 +1207,20 @@ hgppm_plot <- ggplot() +
                filter(zm_lake == "y") %>% 
                mutate(invasion = case_when(zm_sample == "y" ~ "yy",
                                            zm_sample == "n" ~ "yn"),
-                      
-                      species = as.factor(case_when(spec == "BLC" ~ "Black Crappie",
-                                       spec == "BLG" ~ "Bluegill",
-                                       spec == "LMB" ~ "Largemouth Bass",
-                                       spec == "NOP" ~ "Northern Pike",
-                                       spec == "WAE" ~ "Walleye",
-                                       spec == "YEP" ~ "Yellow Perch",
-                                       TRUE ~ NA)),
+                      species = as.factor(case_when(species == "BLC" ~ "Black Crappie",
+                                                    species == "BLG" ~ "Bluegill",
+                                                    species == "LMB" ~ "Largemouth Bass",
+                                                    species == "NOP" ~ "Northern Pike",
+                                                    species == "WAE" ~ "Walleye",
+                                                    species == "YEP" ~ "Yellow Perch",
+                                                    TRUE ~ NA)),
                       species = factor(species, levels = c("Northern Pike",
-                                              "Walleye",
-                                              "Largemouth Bass",
-                                              "Black Crappie",
-                                              "Yellow Perch",
-                                              "Bluegill"))), aes(x = lgthmm, y = hgppm,
-                                                                               color = invasion),
-                      alpha = .2) +
+                                                           "Walleye",
+                                                           "Largemouth Bass",
+                                                           "Black Crappie",
+                                                           "Yellow Perch",
+                                                           "Bluegill"))), 
+             aes(x = lgthmm, y = hgppm, color = invasion), alpha = .2) +
                facet_wrap(~species, scales = "free") +
   scale_linetype_manual("Impact", values = c(1, 6), labels = c("Before", "After")) + 
   scale_colour_manual("Impact", values = c("#00CCCC", "#FF6666"), labels = c("Before", "After")) +
@@ -1270,7 +1269,7 @@ species_images <- data.frame(
 hgppm_plot_icons <- hgppm_plot +
   geom_image(data = species_images, aes(y = y, x = x, image = img), size = .3, inherit.aes = F)
 hgppm_plot_icons
- ggsave("hgppm_raw_predicted_lines_filtered.jpg", width = 7, height = 5)
+# ggsave("hgppm_raw_predicted_lines_filtered.jpg", width = 7, height = 5)
 
 
 #stat for when fish cross the line?
@@ -1424,24 +1423,25 @@ rm(lakes)
 ```
 
 # Senstivty in impact lag selection 
-This is a pretty memory intensive step where we explore the senstivity in zebra mussel effect size to the choice in lag after reported invasion year, constructing the "impact" term. 
+This is a pretty memory intensive step where we explore the sensitivity in zebra mussel effect size to the choice in lag after reported invasion year, constructing the "impact" term. 
 1.) fit a model for every species with lag year 0-5 - 6 for each of the 6 species, 36 models 
 2.) generate marginal effects from each of the model fits
 3.) display results by species based on impact year 
 ```{r}
 #################fitting models
-species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP")
-
+species_list <- c("YEP", "WAE", "NOP", "BLG", "BLC", "LMB")
 
 for (species in species_list) {
   for (lag_val in 0:5) {
 
-    current_data <- combined_data %>% 
-      filter(species == species) %>% 
+    current_data <- all_data %>% 
+      filter(species == !!species) %>% 
       filter(lag == lag_val)
     
-    # Skip if the filtered dataset is empty
-    if(nrow(current_data) == 0) next
+    current_data %>% 
+      group_by(species) %>% 
+      count() %>% 
+      print()
     
     # Define the formula dynamically
     model_formula <- as.formula(
@@ -1453,22 +1453,21 @@ for (species in species_list) {
       formula = model_formula,
       data = current_data,
       family = gaussian(),
-      iter = 500,
-      warmup = 50,
+      iter = 20000,
+      warmup = 5000,
       prior =  c(
         prior(normal(1,100), class = Intercept),
         prior(student_t(3, 0, 2.5), class = sd),
         prior(student_t(3,0,2.5), class = sigma)
-        )
+        ),
+      cores = 4
     )
     
     # Save the model
-    saveRDS(fit, paste0("baci_update_", tolower(species), "_", lag_var, ".rds"))
+    saveRDS(fit, paste0("baci_update_", tolower(species), "_zm_sample_lag_", lag_val, ".rds"))
   }
 }
 
-# Remove created objects
-rm(list = ls(pattern = "^(WAE|NOP|BLG|BLC|LMB|YEP|WTS)_zm_sample"))
 
 #####################reading in saved model fits##############################
 species <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP")
@@ -1478,7 +1477,6 @@ model_list <- list()
 
 for (sp in species) {
     lag_variables <- c(paste0("zm_sample_lag_", 0:5))
-  
   for (lag_var in lag_variables) {
     # Construct the file name
     file_name <- paste0("baci_update_", tolower(sp), "_", lag_var, ".rds")
@@ -1490,6 +1488,7 @@ for (sp in species) {
     model_list[[paste(sp, lag_var, sep = "_")]] <- fit
   }
 }
+
 rm(fit, file_name, lag_var, lag_variables, sp, species)
 
 
@@ -1499,7 +1498,7 @@ marginal_draws_list <- list()
 
 for (model_name in names(model_list)) {
   fit <- model_list[[model_name]]
-  
+  species_name <- str_extract(model_name, "^[A-Z]+")
   # Generate marginal draws
   marg_draws <- emmeans(
     fit, 
@@ -1508,8 +1507,9 @@ for (model_name in names(model_list)) {
     epred = TRUE
   ) %>% 
     gather_emmeans_draws() %>% 
-    mutate(hg_ppm = exp(.value))
-  
+    mutate(hg_ppm = exp(.value),
+           species = species_name)
+  print(fit)
   # Store results
   marginal_draws_list[[model_name]] <- marg_draws
 }
@@ -1524,8 +1524,7 @@ for (model_name in names(marginal_draws_list)) {
   # Compute contrasts
   contrasts_draws <- marg_draws %>% 
     select(-.chain, -.iteration) %>% 
-    #check when running code that this makes sense
-    pivot_wider(names_from = c(zm_lake, all_of(lag)),
+    pivot_wider(names_from = c(zm_lake, zm_sample),
                 values_from = c(.value, hg_ppm)) %>%
     mutate(diff_reference = hg_ppm_n_y - hg_ppm_n_n,
            diff_zm = hg_ppm_y_y - hg_ppm_y_n) %>%
@@ -1555,6 +1554,12 @@ combined_contrasts <- contrasts_list %>%
     )
   )
 
+#quick summary check
+combined_contrasts %>% 
+  group_by(species) %>% 
+  summarise(mean(diff_zm),
+            sd(diff_zm)) %>% 
+  print(n = nrow(.))
   
 combined_contrasts %>%
     pivot_longer(cols = c(diff_reference, diff_zm),
@@ -1574,56 +1579,26 @@ combined_contrasts %>%
     theme(legend.position = "bottom",
           panel.grid.major.x = element_blank(),
           axis.text.x = element_blank())
-ggsave("lag_zm_sensitvity_analysis.jpg", width = 7, height = 5, dpi = 600, background = "white")
+# ggsave("lag_zm_sensitvity_analysis.jpg", width = 7, height = 5, dpi = 600, background = "white")
 
 #diff of diff plot for all 
 diff_of_diff <- combined_contrasts %>% 
   mutate(value = diff_zm - diff_reference) %>% 
   mutate(zm_lake = "Difference in Change")
 
-diff_of_diff %>% 
-  mutate(
-    species = case_when(
-      species == "BLC" ~ "Black Crappie",
-      species == "BLG" ~ "Bluegill",
-      species == "LMB" ~ "Largemouth Bass",
-      species == "NOP" ~ "Northern Pike",
-      species == "WAE" ~ "Walleye",
-      species == "WTS" ~ "White Sucker",
-      species == "YEP" ~ "Yellow Perch",
-      TRUE ~ species
-    ),
-    # Order species so that White Sucker is last
-    species = factor(species, levels = c("Black Crappie", "Bluegill", "Largemouth Bass", 
-                                         "Northern Pike", "Walleye", "Yellow Perch", 
-                                         "White Sucker"))
-  ) %>% 
-  ggplot() +
-  stat_pointinterval(aes(x = lag, y = value, color = lag), .width = c(.66, .95)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  ylab("Difference in Mercury Concentration\nBefore and After (ppm)") +
-  xlab("") +
-  theme_minimal() +
-  theme(
-    legend.position = "none",
-    panel.grid.major.x = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
-    axis.title.y = element_text(size = 8)
-  ) +
-  ylim(-0.4, 0.4) +
-  facet_wrap(~species, ncol = 2)
-ggsave("sensitivity_lag_diff.jpg", dpi = 600, width = 7, height = 11)
-
-diff_of_diff %>% 
-  mutate(species = case_when(species == "BLC" ~ "Black Crappie",
-                             species == "BLG" ~ "Bluegill",
-                             species == "LMB" ~ "Largemouth Bass",
+sens_plot <- diff_of_diff %>% 
+  mutate(species = as.factor(case_when(species == "WAE" ~ "Walleye",
                              species == "NOP" ~ "Northern Pike",
-                             species == "WAE" ~ "Walleye",
-                             species == "WTS" ~ "White Sucker",
+                             species == "LMB" ~ "Largemouth Bass",
+                             species == "BLC" ~ "Black Crappie",
                              species == "YEP" ~ "Yellow Perch",
-                             TRUE ~ species)) %>% 
-  filter(species != "White Sucker") %>% 
+                             species == "BLG" ~ "Bluegill")), 
+         species = factor(species, levels = c("Northern Pike",
+                                              "Walleye",
+                                              "Largemouth Bass",
+                                              "Black Crappie",
+                                              "Yellow Perch",
+                                              "Bluegill"))) %>% 
   ggplot() +
   stat_pointinterval(aes(x = lag, y = value, color = lag), .width = c(.66, .95)) +
   geom_hline(yintercept = 0, linetype = "dashed") +
@@ -1634,14 +1609,35 @@ diff_of_diff %>%
         panel.grid.major.x = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
         axis.title.y = element_text(size = 8)) +
-  facet_wrap(~species)
+  facet_wrap(~species, scales = "free")
+sens_plot
+
+species_images <- data.frame(
+  species = as.factor(c("Northern Pike",
+                        "Walleye", 
+              "Largemouth Bass", 
+              "Black Crappie",
+              "Yellow Perch", 
+              "Bluegill")),
+  img = c(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "pike_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "walleye_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "largemouth_bass_outline.jpg"), 
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "crappie_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "perch_outline.jpg"),
+          file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "bluegill_outline.jpg")),
+  x = 1.25,
+  y = c(0.005, -0.01, -0.04, 0.05, 0.15, 0.022)
+) 
+
+sens_plot_icons <- sens_plot + 
+  geom_image(data = species_images, aes(y = y, x = x, image = img), size = .3, inherit.aes = F)
+sens_plot_icons
+ggsave("senstivity_plot.jpg", height = 4, width = 6, dpi = 900)
 ```
 
 
-####################below is supplemental####################################
-
 # Exploring timing sampling within each group
-Timing of sampling between reference and invaded groupings is important. We want to make sure 1.) the average length in time between pre and post is similar and 2.) the timing relative to impact year is similar 
+Timing of sampling between reference and invaded groupings is important. We want to make sure 1.) the average length in time between pre and post is similar and 2.) the timing relative to impact year is similar and 3.) looking at both put together
 ```{r}
 # Define species list
 species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP")
@@ -1652,17 +1648,18 @@ plots <- list()
 # Loop over species
 for (species in species_list) {
   
-  species_data <- combined_data 
+  species_data <- combined_data %>% 
+    filter(species == !!species)
   
   # Step 2: Process infestation year and post_inv flag
   species_data <- species_data %>%
     mutate(year_infested = ifelse(is.na(year_infested), nearest_infested_year, year_infested)) %>%
     mutate(year_inf_lag2 = year_infested + 2) %>% # time lag set to 2 years
-    mutate(post_inv = year > year_inf_lag2)
+    mutate(post_inv = year >= year_inf_lag2)
   
   # Step 3: Calculate pre/post mean year values
   lake_deltas <- species_data %>%
-    group_by(lake_name, lake_id, post_inv, zm_lake, year_inf_lag2) %>%
+    group_by(lake_id, post_inv, zm_lake, year_inf_lag2) %>%
     summarize(
       mean_yr = mean(year),
       n_yr = length(unique(year)),
@@ -1749,5 +1746,69 @@ all_species %>%
   theme_minimal() +
   facet_wrap(~species, scales = "free")
 rm(lake_level_data, all_species)
+
+######################combining the ###############################
+
+species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP")
+
+plots <- list()
+
+for (species in species_list) {
+  
+  species_data <- combined_data %>%
+    filter(species == !!species) %>%
+    mutate(year_infested = ifelse(is.na(year_infested), nearest_infested_year, year_infested),
+           year_impact = year_infested + 2,   # time lag set to 2 years
+           post_impact = year >= year_impact,
+           time_since_impact = year - year_impact)
+  
+  # Step 1: Calculate delta_t (pre/post year difference) for each lake
+  lake_deltas <- species_data %>%
+    group_by(lake_id, post_impact, zm_lake, year_impact) %>%
+    summarize(
+      mean_yr = mean(year),
+      n_yr = length(unique(year)),
+      .groups = "drop"
+    ) %>%
+    pivot_wider(
+      names_from = post_impact, 
+      values_from = c(mean_yr, n_yr),
+      names_glue = "{.value}_post_impact_{post_impact}"
+    ) %>%
+    mutate(delta_t = round(mean_yr_post_impact_TRUE - mean_yr_post_impact_FALSE, 2))
+  
+  # Step 2: Calculate average time since impact for each lake
+  lake_mean_since <- species_data %>%
+    group_by(lake_id, zm_lake) %>%
+    summarize(mean_since = mean(time_since_impact), .groups = "drop")
+  
+  # Step 3: Join the two datasets
+  species_done <- left_join(lake_deltas, lake_mean_since, by = c("lake_id", "zm_lake"))
+  
+  # Step 4: Plot
+  p <- ggplot(species_done, aes(x = mean_since, y = delta_t, color = zm_lake)) +
+    geom_point(alpha = 0.4) +
+    geom_smooth(method = "lm", se = FALSE) +
+    geom_vline(xintercept = 0, linetype = "dashed") +
+    labs(
+      x = "Time",
+      y = "Delta T",
+      color = "ZM Lake",
+      title = species
+    ) +
+    scale_color_manual(values = c("lightblue", "salmon"), labels = c("Uninvaded", "Zebra Mussel")) +
+    guides(color = "none") +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 8),
+          axis.title.x = element_text(size = 6),    # X-axis label size
+    axis.title.y = element_text(size = 6))
+  
+  plots[[species]] <- p
+}
+
+# Combine the plots in a grid
+wrap_plots(plots)
+
+#ggsave("delta_t_vs_time_since.jpg")
 ```
 
