@@ -39,15 +39,22 @@ library(emmeans)
 ```
 
 #Data
+Read in mercury and covariate data from the Google drive. The entire contaminate database is read in and filtered accordingly. DNR lakeshed, glm lake meta data, infested waters list, and lake link are used to get covraties for modeling. this results fish mercury observations with attached covariate data 
 ```{r}
 #mercury data
 hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
-  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
+  #remove any fish without lenght, mercury, or lake data
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%
+  #only take data from lakes
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
+  #fixes dows using sentienalllakes package
   mutate(DOWID = fixlakeid(DOWID)) %>% 
+  #removes lake supiror 
   filter(DOWID != "16000100") %>% 
+  #gets nhdhr id for each dow
   local_to_nhdhr(from_colname = "DOWID", states = "mn") %>% 
   mutate(nhdhr.id = str_remove(nhdhr.id, "nhdhr_")) %>% 
+  #selects columns for analysis 
   select(SAMPLENO,
          WATERWAY,
          TYPE,
@@ -197,58 +204,16 @@ hg.model <- hg %>%
          time_since_invasion = YEARCOLL - zm_lag_year_infested)
 ```
 
-# Building Leave Out Test 
-```{r}
-#filter data based on basics 
-hg.data <- hg.model %>% 
-  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
-  mutate(HGPPM = case_when(HGPPM <= 0.01 ~ HGPPM/2,
-                           TRUE ~ HGPPM)) %>% 
-  #species with more than 1,000 observations 
-  filter(SPEC %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
-  #post method change and more recent 
-  filter(YEARCOLL > 1999) %>% 
-  #getting rid of some wonky ratios - worth coming back to
-  filter(WS_Lake_Ratio < 100) %>% 
-  #linking data to lat/lon
-  mutate(DOW = as.factor(DOW),
-         DOW = str_pad(DOW, width = 8, pad = "0")) %>% 
-  #removes lakes where lat/lon was not grabbed - worth checking in later
-  filter(!is.na(lake_lat_decdeg)) %>% 
-  filter(!is.na(clarity)) %>% 
-  #transforming some variables for modeling
-  group_by(SPEC) %>% 
-  mutate(scaled_length = c(scale(LGTHIN))) %>% 
-  ungroup() %>%
-  mutate(log_hg = log(HGPPM),
-         scaled_log_area = c(scale(log_area)),
-         scaled_logit_wetlands = c(scale(logit_wetlands)),
-         scaled_logit_urban = c(scale(logit_urban)),
-         scaled_logit_ag = c(scale(logit_ag)),
-         scaled_log_WS_Lake_Ratio = c(scale(log_WS_Lake_Ratio)),
-         scaled_clarity = c(scale(clarity))) %>% 
-  #filtering out super long or short fish
-  filter(!(scaled_length > 3 | scaled_length < -3)) 
-
-#how many lakes do we have?
-hg.data %>% 
-  distinct(DOW)
-
-#how many lakes have wae and nop?
-hg.data %>% 
-  group_by(DOW) %>% 
-  mutate(has_wae_nop = case_when(SPEC == "WAE" ))
-
-
-loo_spec_lakes <- hg.data %>% 
-  distinct(SPEC, DOW) %>% 
-  sample_frac(0.15)
-
-
-```
-
-
-#Models exploring spacial term
+# Models exploring spacial term
+1. further filter and scale data
+2. fit model of constant lscale 10 to entire dataset
+3. generate a subset of lake-spec combos to be left out 
+4. fit model of constant lscale 10 with 15% of spec-lake combos left out
+5. generates summaries of well the model predicted left out samples at 
+        1.) individual level 
+        2.) places where one species was left out but another remained 
+6. fit model with random effect with loo data
+7. generates summaries of prediction of random effects model 
 ```{r}
 ####################filtering hg data for predictive modeling##################
 hg.data <- hg.model %>% 
@@ -410,8 +375,6 @@ predictions_summary <- loo.data %>%
   #this is nessary due to there being some duplicate spec-length-hgppm-year-lake
   distinct(DOW, SPEC, HGPPM, LGTHIN, SPEC, .keep_all = T) %>%
   left_join(predictions_summary, by = c("DOW", "HGPPM", "LGTHIN", "SPEC"))
-
-
 
 
 #making grouping variable for lakes with complete leave out
@@ -1526,7 +1489,6 @@ ggplot(data, aes(x = distance, y = correlation)) +
   annotate("text", x = 15, y = 0.52, label = "Correlation = 0.5", color = "red", size = 4, hjust = 0) +
   annotate("text", x = 40, y = 0.01, label = "Correlation = 0.001", color = "green", size = 4, hjust = 0)
 ```
-
 
 #Leave the recent year out
 ```{r}

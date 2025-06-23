@@ -432,3 +432,42 @@ wae.lake.effect
 ggsave("statewide_wae_dow_effect.png", height = 7, width = 11, dpi = 600)
 ```
 
+# whitefish chain of lakes 
+```{r}
+library(tidyverse)
+
+all_data <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Zebra Mussel Baci Analysis", "Data", "baci_data_29april2025.csv")) %>% 
+  #create lengths in mm from inches
+  mutate(lgthmm = lgthin/0.0393701) %>% 
+  #group by species and lag analysis to scale length for modeling
+  group_by(species, lag) %>% 
+  mutate(scaled_length = c(scale(lgthmm))) %>% 
+  ungroup() %>% 
+  filter(lag == 2)
+
+all_data %>% 
+  filter(lake_id %in% c("18031200", "18031500", "18037800")) %>% 
+  group_by(lake_name, species, zm_sample) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+all_data %>% 
+  filter(species %in% c("LMB", "NOP", "WAE")) %>% 
+  filter(lake_id %in% c("18031200", "18031500", "18037800")) %>% 
+  mutate(species = as.factor(case_when(species == "LMB" ~ "Largemouth Bass",
+                             species == "NOP" ~ "Northern Pike",
+                             species == "WAE" ~ "Walleye")),
+         species = factor(species, levels = c("Walleye", "Northern Pike", "Largemouth Bass"))) %>% 
+  ggplot() +
+  geom_point(aes(lgthin, hgppm, color = zm_sample)) +
+  geom_smooth(aes(lgthin, hgppm, color = zm_sample),
+               method = "gam", formula = y ~ s(x, k = 4),
+              se = F) +
+  scale_color_manual("", values = c("lightblue", "salmon"), labels = c("Pre", "Post")) +
+  facet_grid(lake_name ~ species, scales = "free") +
+  labs(x = "Length (Inches)",
+       y = "Fish Tissue Mercury Concentratino (ppm)") +
+  theme_minimal()
+ggsave("Whitefish_area_lakes.jpg", height = 5, width = 7, dpi = 600)
+```
+
