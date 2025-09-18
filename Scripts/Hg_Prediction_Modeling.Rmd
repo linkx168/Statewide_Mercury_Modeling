@@ -18,6 +18,7 @@ The general structure of this markdown
 library(tidyverse)
 library(arrow)
 library(LAGOSNE)
+library(ggrepel)
 library(mwlaxeref)
 library(mnsentinellakes)
 library(corrplot)
@@ -725,6 +726,274 @@ predictions_summary_original %>%
   guides(color = guide_legend("Legend")) +
   theme(legend.position = "top")
 ```
+
+# differnces between random and gp in prediction
+```{r}
+#mercury data ready for modeling after filtering on covaraite data
+total_data <- read_csv(file.path("G:",
+                     "Shared drives",
+                     "Hansen Lab",
+                     "RESEARCH PROJECTS",
+                     "Statewide mercury modeling",
+                     "Predictive Modeling",
+                     "Model Outputs",
+                     "total_hg_data.csv"))
+
+#data with 15% of lake-spec combos left out
+full_loo_data <- read_csv(file.path("G:",
+                     "Shared drives",
+                     "Hansen Lab",
+                     "RESEARCH PROJECTS",
+                     "Statewide mercury modeling",
+                     "Predictive Modeling",
+                     "Model Outputs",
+                     "loo_data_constant_lscale.csv"))
+
+#left out data
+left_out_data <- total_data %>% 
+  anti_join(full_loo_data)
+
+#gp model fit with constant lscale at 10 using loo data
+gp_fit <- readRDS(file.path("G:",
+                     "Shared drives",
+                     "Hansen Lab",
+                     "RESEARCH PROJECTS",
+                     "Statewide mercury modeling",
+                     "Predictive Modeling",
+                     "Model Outputs",
+                     "statewide_gp_constant_loo.rds"))
+
+#random effects model fit using loo data
+rand_fit <- readRDS(file.path("G:",
+                     "Shared drives",
+                     "Hansen Lab",
+                     "RESEARCH PROJECTS",
+                     "Statewide mercury modeling",
+                     "Predictive Modeling",
+                     "Model Outputs",
+                     "statewide_random_loo.rds"))
+###############################################################################
+# compare betas
+gp_coefs <- fixef(gp_fit)
+rand_coefs <- fixef(rand_fit)
+
+head(gp_coefs)
+head(rand_coefs)
+
+gp_coefs <- as.data.frame(gp_coefs) %>% 
+  rownames_to_column("term") %>% 
+  mutate(model = "gp")
+
+rand_coefs <- as.data.frame(rand_coefs) %>% 
+  rownames_to_column("term") %>% 
+  mutate(model = "random")
+coef_compare <- bind_rows(gp_coefs, rand_coefs)
+rm(gp_coefs, rand_coefs)
+##############################################################################
+coef_wide <- coef_compare %>%
+  select(term, model, Estimate) %>%
+  pivot_wider(names_from = model, values_from = Estimate) %>%
+  mutate(diff = gp - random)
+
+ggplot(coef_wide %>% 
+         mutate(type = case_when(str_detect(term, "SPEC") ~ "species",
+                                 TRUE ~ "lake")), aes(x = random, y = gp, label = term)) +
+  geom_point(aes(color = type), size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
+  geom_text_repel(
+    nudge_y = 0.3,
+    segment.color = "grey50", 
+    segment.size = 0.3,         
+    max.overlaps = Inf          
+  ) +
+  labs(
+    x = "Random effects estimates",
+    y = "Gaussian Process estimates"
+  ) +
+  theme(legend.position = "bottom")
+rm(coef_compare, coef_wide)
+###########################################################################
+gp_preds   <- posterior_predict(gp_fit, newdata = left_out_data, ndraws = 300)
+rand_preds <- posterior_predict(rand_fit, newdata = left_out_data, ndraws = 300, allow_new_levels = T)
+
+summarize_preds <- function(pred_matrix, observed) {
+  apply(pred_matrix, 2, function(x) {
+    c(
+      mean   = mean(x),
+      median = median(x),
+      sd     = sd(x),
+      l95    = quantile(x, 0.025),
+      u95    = quantile(x, 0.975)
+    )
+  }) %>%
+    t() %>%
+    as.data.frame() %>%
+    mutate(obs = observed)
+}
+
+gp_summary <- summarize_preds(gp_preds, left_out_data$log_hg)
+rand_summary <- summarize_preds(rand_preds, left_out_data$log_hg)
+
+gp_summary$model <- "gp"
+rand_summary$model <- "random"
+
+pred_summary <- bind_rows(gp_summary, rand_summary)
+
+
+ggplot(pred_summary, aes(x = obs, y = median, color = model)) +
+  geom_point(alpha = 0.5) +
+  geom_errorbar(aes(ymin = `l95.2.5%`, ymax = `u95.97.5%`), alpha = 0.2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(x = "Observed log(Hg)",
+       y = "Predicted median log(Hg)") +
+  theme_minimal() +
+  facet_wrap(~model)
+#ggsave("gp_random_obs_vs_fitted.jpg", height = 5, width = 6, dpi = 600)
+rm(pred_summary, gp_preds, rand_preds)
+
+compute_metrics <- function(df) {
+  data.frame(
+    MAD  = median(abs(df$median - df$obs)),  # median absolute deviation
+    RMSE = sqrt(mean((df$mean - df$obs)^2)), # root mean squared error
+    CI_width = mean(df$u95 - df$l95),        # avg 95% CI width
+    avg_sd   = mean(df$sd),                  # avg posterior sd
+    coverage = mean(df$obs >= df$l95 & df$obs <= df$u95) * 100 # % within 95% CI
+  )
+}
+
+gp_metrics   <- compute_metrics(gp_summary)   %>% mutate(model = "gp")
+rand_metrics <- compute_metrics(rand_summary) %>% mutate(model = "random")
+
+metrics_all <- bind_rows(gp_metrics, rand_metrics)
+rm(gp_metrics, rand_metrics, metrics_all)
+#############################################################################
+train_lakes <- unique(full_loo_data$DOW)
+left_out_data <- left_out_data %>% 
+  mutate(lake_status = case_when(DOW %in% train_lakes ~ "partial",
+                                 TRUE ~ "new"))
+
+train_species_by_lake <- full_loo_data %>% 
+  group_by(DOW) %>% 
+  summarise(species_present = list(unique(SPEC)), .groups = "drop")
+
+left_out_data <- left_out_data %>% 
+  left_join(train_species_by_lake, by = "DOW") %>% 
+  mutate(species_present = replace_na(species_present, list(character())))
+
+left_out_data <- left_out_data %>% 
+  mutate(species_case = case_when(lake_status == "new" ~ "new_lake",
+                                  map_lgl(species_present, ~ !("WAE" %in% .x | "NOP" %in% .x)) ~ "partial_no_wae_nop",
+                                  TRUE ~ "partial_wae_or_nop"))
+
+
+left_out_data %>%
+  distinct(DOW, .keep_all = T) %>% 
+  group_by(species_case) %>% 
+  count()
+#13 new lakes, 43 that do no have wae or nop, and 322 that have one or the other 
+
+gp_summary <- summarize_preds(posterior_predict(gp_fit, 
+                                                newdata = left_out_data, 
+                                                ndraws = 300),
+                              left_out_data$log_hg
+                              ) %>% 
+  bind_cols(left_out_data %>% 
+              select(DOW, SPEC, species_case))
+
+rand_summary <- summarize_preds(posterior_predict(rand_fit, 
+                                                  newdata = left_out_data,
+                                                  ndraws = 300,
+                                                  allow_new_levels = T),
+                                left_out_data$log_hg) %>% 
+  bind_cols(left_out_data %>% 
+              select(DOW, SPEC, species_case))
+
+
+gp_metrics <- gp_summary %>%
+  group_by(species_case) %>%
+  summarise(
+    MAD  = median(abs(median - obs)),
+    RMSE = sqrt(mean((mean - obs)^2)),
+    CI_width = mean(`u95.97.5%` - `l95.2.5%`),
+    avg_sd   = mean(sd),
+    coverage = mean(obs >= `l95.2.5%` & obs <= `u95.97.5%`) * 100,
+    .groups = "drop"
+  ) %>%
+  mutate(model = "gp")
+
+rand_metrics <- rand_summary %>%
+  group_by(species_case) %>%
+  summarise(
+    MAD  = median(abs(median - obs)),
+    RMSE = sqrt(mean((mean - obs)^2)),
+    CI_width = mean(`u95.97.5%` - `l95.2.5%`),
+    avg_sd   = mean(sd),
+    coverage = mean(obs >= `l95.2.5%` & obs <= `u95.97.5%`) * 100,
+    .groups = "drop"
+  ) %>%
+  mutate(model = "random")
+
+metrics_all <- bind_rows(gp_metrics, rand_metrics)
+
+metrics_long <- metrics_all %>%
+  pivot_longer(
+    cols = c(MAD, RMSE, CI_width, avg_sd, coverage),
+    names_to = "metric",
+    values_to = "value"
+  )
+metrics_long %>% 
+  print(n = nrow(.))
+
+ggplot(metrics_long, aes(x = model, y = value, fill = model)) +
+  geom_col(position = "dodge") +
+  facet_grid(metric ~ species_case, scales = "free_y") +
+  labs(x = "Model type", y = "Metric value") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+#ggsave("metrics_levels.jpg", height = 6, width = 6, dpi = 600)
+
+# Filter only the new lake cases
+new_lake_preds <- bind_rows(
+  gp_summary %>% mutate(model = "gp"),
+  rand_summary %>% mutate(model = "random")
+) %>%
+  filter(species_case == "new_lake")
+
+# Plot observed vs predicted
+ggplot(new_lake_preds, aes(x = obs, y = median, color = model)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~model) +
+  labs(
+    x = "Observed log(Hg)",
+    y = "Predicted log(Hg)",
+    title = "Observed vs Predicted for New Lakes",
+    subtitle = "Comparing Gaussian Process vs Random effects"
+  ) +
+  theme_minimal()
+#ggsave("new_lake_predictions.jpg", height = 5, width = 5, dpi = 600)
+
+new_spec_with_wae_nop <- bind_rows(
+  gp_summary %>% mutate(model = "gp"),
+  rand_summary %>% mutate(model = "random")
+) %>%
+  filter(species_case == "partial_wae_or_nop")
+
+# Plot observed vs predicted
+ggplot(new_spec_with_wae_nop, aes(x = obs, y = median, color = model)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~model) +
+  labs(
+    x = "Observed log(Hg)",
+    y = "Predicted log(Hg)",
+    title = "Observed vs Predicted for species (wae or nop present)",
+    subtitle = "Comparing Gaussian Process vs Random effects"
+  ) +
+  theme_minimal()
+#ggsave("new_spec_with_nop_wae.jpg", height = 5, width = 5, dpi = 600)
+```
+
 
 #GP with all lakes
 The general structure of this chunk
