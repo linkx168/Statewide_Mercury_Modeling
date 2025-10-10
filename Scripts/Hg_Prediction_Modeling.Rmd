@@ -730,7 +730,7 @@ predictions_summary_original %>%
 # differnces between random and gp in prediction
 ```{r}
 #mercury data ready for modeling after filtering on covaraite data
-total_data <- read_csv(file.path("G:",
+total_data <- read_csv(file.path("D:",
                      "Shared drives",
                      "Hansen Lab",
                      "RESEARCH PROJECTS",
@@ -740,7 +740,7 @@ total_data <- read_csv(file.path("G:",
                      "total_hg_data.csv"))
 
 #data with 15% of lake-spec combos left out
-full_loo_data <- read_csv(file.path("G:",
+full_loo_data <- read_csv(file.path("D:",
                      "Shared drives",
                      "Hansen Lab",
                      "RESEARCH PROJECTS",
