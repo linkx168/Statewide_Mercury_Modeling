@@ -801,7 +801,7 @@ ggplot(coef_wide %>%
   geom_point(aes(color = type), size = 2) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
   geom_text_repel(
-    nudge_y = 0.3,
+    #nudge_y = 0.3,
     segment.color = "grey50", 
     segment.size = 0.3,         
     max.overlaps = Inf          
@@ -811,6 +811,7 @@ ggplot(coef_wide %>%
     y = "Gaussian Process estimates"
   ) +
   theme(legend.position = "bottom")
+ggsave("beta_compare.jpg", height = 5, width = 7, dpi = 600)
 rm(coef_compare, coef_wide)
 ###########################################################################
 gp_preds   <- posterior_predict(gp_fit, newdata = left_out_data, ndraws = 300)

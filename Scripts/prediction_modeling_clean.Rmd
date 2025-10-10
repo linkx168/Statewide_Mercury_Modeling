@@ -1,0 +1,936 @@
+---
+title: "prediction_modeling_clean"
+output: html_document
+date: "2025-10-07"
+editor_options: 
+  chunk_output_type: console
+---
+
+# library
+```{r}
+library(tidyverse)
+library(arrow)
+library(LAGOSNE)
+library(ggrepel)
+library(mwlaxeref)
+library(mnsentinellakes)
+library(corrplot)
+library(performance)
+library(brms)
+library(lme4)
+library(Matrix)
+library(car)
+library(tidybayes)
+library(rstanarm)
+library(bayesplot)
+library(loo)
+library(arrow)
+library(sf)
+library(maps)
+library(viridis)
+library(tigris)
+library(emmeans)
+```
+
+# data
+Read in mercury and covariate data from the Google drive. The entire contaminate database, along with DNR lakeshed, glm lake metadata, infested waters list, and lake link to get predictors for modeling. We are left with merucry data and covarites. Things to note:
+
+Mercury data: 
+-filtered so all values have a length, mercury value, and DOW
+-filtered to only include lakes
+-lake superior is filtered out
+-used the mwlaxref package to get from dow to nhdhrid
+
+Lakeshed data:
+-pulled from MN DNR 
+-transform to the logit scale
+  -I give it %'s but it recognizes and changes to props
+  -for items that are 0 it returns 0.025 and for items that are 100 it returns 0.975
+
+GLM data:
+-just grabbing the clarity value and the area
+-covert infinite clarity values to NA
+
+Infested waters list:
+-pulled from year 2024 
+-create some variables based on designation year by the DNR
+
+Lake Link:
+-getting coordinates for these lakes 
+-I also convert these to easting and northing (for Gaussian process modeling)
+
+Final product:
+-mercury data connected to covariate data with selected columns for modeling
+-further filtering and scaling is needed prior to modeling 
+```{r}
+#mercury data
+hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+  #remove any fish without length, mercury, or lake data
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%
+  #only take data from lakes
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
+  #fixes dows using sentienalllakes package
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  #removes lake supiror 
+  filter(DOWID != "16000100") %>% 
+  #gets nhdhr id for each dow
+  local_to_nhdhr(from_colname = "DOWID", states = "mn") %>% 
+  mutate(nhdhr.id = str_remove(nhdhr.id, "nhdhr_")) %>% 
+  #selects columns for analysis 
+  select(SAMPLENO,
+         WATERWAY,
+         TYPE,
+         LOCATION,
+         DOWID,
+         nhdhr.id,
+         DATECOL2,
+         YEARCOLL,
+         SPEC,
+         ANATHG,
+         NOFISH,
+         LGTHIN,
+         WTLB,
+         AGE,
+         SEX,
+         HGPPM,
+         HGCODE,
+         HGLAB,
+         HGCMMT) %>% 
+  rename(DOW = DOWID,
+         nhdid = nhdhr.id) %>% 
+  ungroup()
+
+# Minnesota lakeshed data
+dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+  mutate(logit_wetlands = car::logit(Percent_Wetland),
+         logit_urban = car::logit(Percent_Urban),
+         logit_ag = car::logit(Percent_Cultivated_Crops),
+         log_WS_Lake_Ratio = log(WS_Lake_Ratio))
+
+#glm for clarity and area
+glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+  filter(state == "MN") %>% 
+  rename(nhdid = site_id) %>% 
+  mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
+  mutate(clarity = case_when(is.infinite(clarity) ~ NA,
+                             TRUE ~ clarity)) %>% 
+  mutate(log_area = log(area))
+
+#infested waters list
+zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv")) %>% 
+  filter(!is.na(DOW))  %>% 
+  mutate(DOW = as.character(gsub("-", "", DOW))) %>% 
+  select(DOW,
+         Year_Infested) %>% 
+  mutate(zm_lag_year_infested = Year_Infested +2)
+
+#lake link
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
+
+#converting coordinates to sf to get easting and northing
+lake_link_sf <- lake_link %>% 
+  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326) %>% 
+  st_transform(crs = 32615)
+utm_coords <- st_coordinates(lake_link_sf)
+lake_link <- lake_link %>%
+  mutate(easting = utm_coords[, 1]/1000,
+         northing = utm_coords[, 2]/1000)
+#utm values in km instead of m
+rm(lake_link_sf, utm_coords)
+
+######################add datasets together#####################################
+hg <- hg %>% 
+  left_join(dnr_covary)
+rm(dnr_covary)
+
+
+hg <- hg %>% 
+  left_join(glm) 
+rm(glm)
+
+hg <- hg %>% 
+  left_join(zm, by = c("DOW"))
+rm(zm)
+
+hg <- hg %>% 
+  left_join(lake_link)
+rm(lake_link)
+
+##################selecting columns#############################################
+hg <- hg %>%
+  select(WATERWAY,
+         TYPE,
+         DOW,
+         nhdid,
+         DATECOL2,
+         YEARCOLL,
+         SPEC,
+         ANATHG,
+         NOFISH,
+         LGTHIN,
+         HGPPM,
+         Total_Wetland_Hectares,
+         Percent_Wetland,
+         Percent_Urban,
+         Percent_Cultivated_Crops,
+         logit_wetlands,
+         logit_urban,
+         logit_ag,
+         WS_Lake_Ratio,
+         log_WS_Lake_Ratio,
+         centroid_lat,
+         centroid_lon,
+         max_depth,
+         area,
+         log_area,
+         elevation,
+         clarity,
+         Year_Infested,
+         zm_lag_year_infested,
+         lake_lat_decdeg,
+         lake_lon_decdeg,
+         easting,
+         northing) %>% 
+  mutate(zm_lake = case_when(is.na(Year_Infested) ~ "n",
+                             TRUE ~ "y"),
+         zm_sample = case_when(zm_lag_year_infested <= YEARCOLL ~ "y",
+                               TRUE ~ "n"),
+         time_since_invasion = YEARCOLL - zm_lag_year_infested)
+
+hg <- hg %>% 
+  janitor::clean_names()
+```
+
+# filtering data for predictive modeling
+Biggest items:
+-LOD handling (take half of the reported value)
+-filter for species of interest 
+-filter for years 2000-most recent
+-filter any really big watersheds out (driving some skewed covariates), these are mostly reservoirs
+-scale length by species
+-scale lake-level covarites
+-filtering out any fish that are +/- 3 SD 
+```{r}
+hg.model <- hg %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(hgppm = case_when(hgppm <= 0.01 ~ hgppm/2,
+                           TRUE ~ hgppm)) %>% 
+  #species with more than 1,000 observations 
+  filter(spec %in% c("WAE", "NOP", "BLC", "YEP", "BLG", "LMB", "WTS")) %>% 
+  #post method change and more recent 
+  filter(yearcoll > 1999) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(ws_lake_ratio < 100) %>% 
+  #linking data to lat/lon
+  mutate(dow = as.factor(dow),
+         dow = str_pad(dow, width = 8, pad = "0")) %>% 
+  #transforming some variables for modeling
+  group_by(spec) %>% 
+  mutate(scaled_length = c(scale(lgthin))) %>% 
+  ungroup() %>%
+  mutate(log_hg = log(hgppm),
+         scaled_log_area = c(scale(log_area)),
+         scaled_logit_wetlands = c(scale(logit_wetlands)),
+         scaled_logit_urban = c(scale(logit_urban)),
+         scaled_logit_ag = c(scale(logit_ag)),
+         scaled_log_ws_lake_ratio = c(scale(log_ws_lake_ratio)),
+         scaled_clarity = c(scale(clarity))) %>% 
+  #filtering out super long or short fish
+  filter(!(scaled_length > 3 | scaled_length < -3)) %>% 
+  #filter out any NA area (this will include some border lakes that don't have xwalk)
+  filter(!is.na(area))
+rm(hg)
+```
+
+# leave out data
+Leaving out 15% of unique lake-species combos. This will entire lake leave outs. It will also include some leave outs where one species is removed and at least one remains
+```{r}
+set.seed(10)
+
+#filtering out spec-lake combinations
+loo_spec_lakes <- hg.model %>% 
+  distinct(spec, dow) %>% 
+  sample_frac(0.15)
+
+hg.data.loo <- hg.model %>% 
+  anti_join(loo_spec_lakes, by = c("spec", "dow"))
+
+#summary of samples that were left out
+hg.model %>% 
+  semi_join(loo_spec_lakes, by = c("spec", "dow")) %>% 
+  summarise(avg_hg = mean(hgppm),
+            wae = sum(spec == "WAE"),
+            nop = sum(spec == "NOP"),
+            spec_else = sum(spec != "WAE" & spec != "NOP"),
+            zm_samples = sum(zm_sample == "y"),
+            n = n())
+
+hg.model %>% 
+  semi_join(loo_spec_lakes, by = c("spec", "dow")) %>% 
+  distinct(dow, .keep_all = T) %>% 
+  summarise(avg_size = mean(area, na.rm = T),
+            avg_wetland = mean(percent_wetland),
+            avg_urban = mean(percent_urban),
+            zm_lake = sum(zm_sample == "y"),
+            n_lakes = n_distinct(dow))
+
+#are there any lakes totally removed?
+#if multipule species were removed making removed completely, the lake will show up n times
+hg.model %>% 
+  distinct(dow, spec) %>% 
+  anti_join(hg.data.loo, by = "dow") %>% 
+  arrange(dow) %>% 
+  print(n = nrow(.))
+
+#how many times was a species removed but at least one still remained?
+hg.model %>%
+  distinct(dow, spec) %>%
+  anti_join(hg.data.loo, by = c("spec", "dow")) %>% 
+  semi_join(hg.data.loo, by = "dow") 
+
+#write_csv(hg.data.loo, "hg_model_data_loo.csv")
+rm(loo_spec_lakes)
+```
+
+# saved left out data
+Here is a short cut for reading in the leave out data from the drive. We also generate a dataframe of the data that has been left out of the modeling
+```{r}
+hg.data.loo <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
+
+hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv")) %>% 
+  select(spec, yearcoll, dow, hgppm, lgthin)
+
+left_out_data <- hg.model %>% 
+  anti_join(hg.data.loo_anti)
+
+rm(hg.data.loo_anti)
+```
+
+
+# random effects model
+```{r}
+# fit <- brm(log_hg ~ 
+#                 scaled_length*spec + 
+#                 spec + 
+#                 scaled_logit_wetlands + 
+#                 scaled_logit_urban +
+#                 scaled_logit_ag + 
+#                 scaled_log_ws_lake_ratio + 
+#                 scaled_log_area + 
+#                 zm_sample +
+#                 (1|dow),
+#                      data = hg.data.loo,
+#                      iter = 10000,
+#                      warmup = 500,
+#                      chains = 3,
+#                      family = gaussian())
+
+#saveRDS(fit, "mn_random_leave_out.rds")
+
+fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mn_random_leave_out.rds"))
+
+summary(fit)
+```
+
+# predictions
+Now lets make predictions from the left out data and see how well we do. 500 draws should be sufficient for both point estimates and getting feel for uncertainty. So we end up with 500 different predictions for each point that was left out (one from each of the 500 draws). We will then have to summaries across draws from each point. We can gather information about point level uncertainty. We then can look at uncertainty to different levels 
+```{r}
+predictions <- left_out_data %>% 
+  add_predicted_draws(fit, ndraws = 500, allow_new_levels = T)
+
+#write_csv(predictions, "predictions_left_out.csv")
+
+predictions <- read_csv("predictions_left_out.csv")
+```
+
+# summary from predictions 
+1. We do this on the log scale
+2. We do this on the original scale (backtransformed)
+```{r}
+#summary of the draws for each prediction (on log scale)
+predictions_summary <- predictions %>% 
+  group_by(dow, hgppm, lgthin, spec, .row) %>%
+  summarise(.pred_sd = sd(.prediction),
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction))
+
+#connect these predictions back to the original data
+predictions_summary <- left_out_data %>% 
+  #this is needed due to maybe duplicate spec-length-hgppm-year-lake
+  distinct(dow, spec, hgppm, lgthin, spec, .keep_all = T) %>% 
+  left_join(predictions_summary, by = c("dow", "hgppm", "lgthin", "spec"))
+
+##############################################################################
+
+#summary of predictions in the original scale (back transformed)
+predictions_summary_original <- predictions %>% 
+  mutate(.prediction = exp(.prediction)) %>% 
+  group_by(dow, hgppm, lgthin, spec, .row) %>%
+  summarise(.pred_sd = sd(.prediction),
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction))
+
+predictions_summary_original <- left_out_data %>% 
+  #this is needed due to there being some duplicate spec-length-hgppm-year-lake
+  distinct(dow, spec, hgppm, lgthin, spec, .keep_all = T) %>% 
+  left_join(predictions_summary_original, by = c("dow", "hgppm", "lgthin", "spec"))
+```
+
+# summary of data that was left out
+Here we get a summary of:
+1. how many total lakes were left out
+2. partial lakes with no walleye remaining
+3. partial lakes with walleye or nop remaining
+```{r}
+train_lakes <- unique(hg.data.loo$dow)
+left_out_data <- left_out_data %>% 
+  mutate(lake_status = case_when(dow %in% train_lakes ~ "partial",
+                                 TRUE ~ "new"))
+
+train_species_by_lake <- hg.data.loo %>% 
+  group_by(dow) %>% 
+  summarise(species_present = list(unique(spec)), .groups = "drop")
+
+left_out_data <- left_out_data %>% 
+  left_join(train_species_by_lake, by = "dow") %>% 
+  mutate(species_present = replace_na(species_present, list(character())))
+
+left_out_data <- left_out_data %>% 
+  mutate(species_case = case_when(lake_status == "new" ~ "new_lake",
+                                  map_lgl(species_present, ~ !("WAE" %in% .x | "NOP" %in% .x)) ~ "partial_no_wae_nop",
+                                  TRUE ~ "partial_wae_or_nop"))
+
+
+left_out_data %>%
+  distinct(dow, .keep_all = T) %>% 
+  group_by(species_case) %>% 
+  count()
+
+rm(train_lakes, train_species_by_lake)
+```
+
+
+# complete lake leave out - predictive metric summary
+```{r}
+#making grouping variable for lakes with complete leave out
+loo_lakes <- hg.model %>% 
+  distinct(dow) %>% 
+  anti_join(hg.data.loo, by = "dow")
+
+# assign a y or n to lakes based on if it was completely left out or not
+predictions_summary <- predictions_summary %>% 
+  mutate(lake_loo = case_when(dow %in% loo_lakes$dow ~ "y",
+                              TRUE ~ "n"))
+rm(loo_lakes)
+
+#lets generate some predictive metrics from this
+error_metrics <- predictions_summary %>%
+  mutate(
+    error = abs(log_hg - .prediction),
+    squared_error = (log_hg - .prediction)^2,
+    within_interval = ifelse(log_hg >= .lower & log_hg <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  group_by(lake_loo) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd)
+  )
+error_metrics
+
+############################################################################
+loo_lakes <- hg.model %>% 
+  distinct(dow) %>% 
+  anti_join(hg.data.loo, by = "dow")
+
+predictions_summary_original <- predictions_summary_original %>% 
+  mutate(lake_loo = case_when(dow %in% loo_lakes$dow ~ "y",
+                              TRUE ~ "n"))
+rm(loo_lakes)
+
+error_metrics_backtransformed <- predictions_summary_original %>%
+  mutate(
+    error_original = abs(hgppm - .prediction),
+    squared_error_original = (hgppm - .prediction)^2,
+    within_interval_original = ifelse(hgppm >= .lower & hgppm <= .upper, 1, 0),
+    interval_width_original = .upper - .lower,
+  ) %>% 
+  group_by(lake_loo) %>% 
+  summarise(
+    MAE_original = mean(error_original, na.rm = TRUE),
+    RMSE_original = sqrt(mean(squared_error_original, na.rm = TRUE)),
+    coverage_original = mean(within_interval_original, na.rm = TRUE),
+    avg_interval_width_original = mean(interval_width_original, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd, na.rm = T)
+  )
+error_metrics_backtransformed
+```
+
+# compelte lake leave out - predictive plots
+```{r}
+# how well did we predict leave out lakes relative to non-leave out lakes? - log scale
+predictions_summary %>% 
+  ggplot() +
+  geom_point(aes(hgppm, exp(.prediction), color = lake_loo)) +
+  geom_abline(slope = 1, intercept = 0, color = "royalblue", linetype = "dashed") +
+  scale_color_manual(values = c("navyblue", "orange")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+#ggsave("whole_lake_scatter.jpg")
+
+################################################################################
+# how well did we predict on the original scale?
+#y-axis log transformed for display
+predictions_summary_original %>%
+  group_by(spec) %>% 
+  arrange(hgppm) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = log(.lower), ymax = log(.upper)), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = log(.prediction)), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = log(.prediction)), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_wrap(~spec, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+ggsave("loo_prediction_original_logged_for_display.png", dpi = 600, width = 11, height = 7, bg = "white")
+
+predictions_summary_original %>%
+  group_by(spec) %>% 
+  arrange(hgppm) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = .prediction), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = .prediction), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = 0.22, linetype = "dashed") +
+  facet_wrap(~spec, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+#ggsave("loo_prediction_original.png", dpi = 600, width = 11, height = 7, bg = "white")
+
+################################################################################
+predictions_summary_original %>%
+  group_by(spec) %>% 
+  arrange(.prediction) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = log(.lower), ymax = log(.upper)), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = log(.prediction)), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = log(hgppm)), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_grid(lake_loo~spec, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+```
+
+# species leave out - metrics
+```{r}
+#making grouping variable for lakes with complete leave out
+loo_lakes <- left_out_data %>% 
+  distinct(dow, lake_status, species_present, species_case) 
+
+# assign a y or n to lakes based on if it was completely left out or not
+predictions_summary_spec <- predictions_summary %>% 
+  left_join(loo_lakes) %>% 
+  filter(lake_status != "new")
+rm(loo_lakes)
+
+#lets generate some predictive metrics from this
+error_metrics <- predictions_summary_spec %>%
+  mutate(
+    error = abs(log_hg - .prediction),
+    squared_error = (log_hg - .prediction)^2,
+    within_interval = ifelse(log_hg >= .lower & log_hg <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  group_by(species_case) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd)
+  )
+error_metrics
+
+############################################################################
+loo_lakes <- left_out_data %>% 
+  distinct(dow, lake_status, species_present, species_case) 
+
+# assign a y or n to lakes based on if it was completely left out or not
+predictions_summary_spec_org <- predictions_summary_original %>% 
+  left_join(loo_lakes) %>% 
+  filter(lake_status != "new")
+rm(loo_lakes)
+
+error_metrics_backtransformed <- predictions_summary_spec_org %>%
+  mutate(
+    error_original = abs(hgppm - .prediction),
+    squared_error_original = (hgppm - .prediction)^2,
+    within_interval_original = ifelse(hgppm >= .lower & hgppm <= .upper, 1, 0),
+    interval_width_original = .upper - .lower,
+  ) %>% 
+  group_by(species_case) %>% 
+  summarise(
+    MAE_original = mean(error_original, na.rm = TRUE),
+    RMSE_original = sqrt(mean(squared_error_original, na.rm = TRUE)),
+    coverage_original = mean(within_interval_original, na.rm = TRUE),
+    avg_interval_width_original = mean(interval_width_original, na.rm = TRUE),
+    avg_pred_sd = mean(.pred_sd, na.rm = T)
+  )
+error_metrics_backtransformed
+```
+
+# species leave out - plots
+```{r}
+# Plot observed vs predicted
+predictions_summary_spec %>% 
+  filter(lake_status != "new") %>% 
+ggplot(aes(x = hgppm, y = exp(.prediction))) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "Observed log(Hg)",
+    y = "Predicted log(Hg)",
+  ) +
+  facet_wrap(~species_case) +
+  theme_minimal()
+#ggsave("loo_spec_scatter.jpg", height = 5, width = 5, dpi = 600)
+```
+
+# predicitons at the lake-species level (not fish level)
+Lets compare how well we predict the observed mean within a species-lake:
+1. calculate the mean values within a species-lake (we will use the same length of fish for predictions so we won't have to worry about that)
+2. from the predicted values, calculate the mean of value of each spec-lake-year. This would mean averaging across species, lake, .draw. (grouping by draw gets us each observation within lake-species-year and thus a mean mercury value for the grouping) - we will get 500 draws of each mean
+3. compare the observed mean to the predicted mean
+```{r}
+# we group by .draw here so that we get an average of all fish in a lake-spec within a draw
+#we essentially get 500 estimates of each lake-spec average value across all lengths
+lake_species_preds <- predictions %>% 
+  group_by(dow, spec, .draw) %>% 
+  summarise(mean_pred = mean(.prediction))  %>% 
+  ungroup() %>% 
+  group_by(dow, spec) %>% 
+  median_qi(mean_pred) %>% 
+  select(-.width,
+         -.point,
+         -.interval)
+
+lake_species_obs <- left_out_data %>% 
+  group_by(dow, spec) %>% 
+  summarise(mean_obs = mean(log_hg))
+
+lake_species_compare <- left_join(lake_species_preds, lake_species_obs, by = c("dow", "spec"))
+rm(lake_species_preds, lake_species_obs)
+
+
+lake_species_metrics <- lake_species_compare %>%
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+lake_species_metrics
+
+#what about by various groupings?
+
+loo_lakes <- left_out_data %>% 
+  distinct(dow, spec, lake_status, species_present, species_case)
+
+lake_species_compare <- lake_species_compare %>% 
+  left_join(loo_lakes)
+
+lake_species_compare %>%
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  group_by(lake_status) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+
+lake_species_compare %>%
+  filter(lake_status != "new") %>% 
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>% 
+  group_by(species_case) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+
+lake_species_compare %>% 
+ggplot(aes(x = mean_obs, y = mean_pred)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "Observed log(Hg)",
+    y = "Predicted log(Hg)",
+  ) +
+  theme_minimal()
+
+lake_species_compare %>%
+  group_by(spec) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_wrap(~spec, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+lake_species_compare %>%
+  group_by(spec) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_grid(spec~lake_status, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+#lets filter for where the partial miss to see how viz how badly 
+lake_species_compare %>%
+  filter(mean_obs <= .lower | mean_obs >= .upper) %>% 
+  group_by(spec) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_grid(spec~lake_status, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+###############################################################################
+#lets do this on the back transformed scale as well
+lake_species_preds <- predictions %>% 
+  group_by(dow, spec, .draw) %>% 
+  summarise(mean_pred = mean(exp(.prediction)))  %>% 
+  ungroup() %>% 
+  group_by(dow, spec) %>% 
+  median_qi(mean_pred) %>% 
+  select(-.width,
+         -.point,
+         -.interval)
+
+lake_species_obs <- left_out_data %>% 
+  group_by(dow, spec) %>% 
+  summarise(mean_obs = mean(hgppm))
+
+lake_species_compare <- left_join(lake_species_preds, lake_species_obs, by = c("dow", "spec"))
+rm(lake_species_preds, lake_species_obs)
+
+
+lake_species_metrics <- lake_species_compare %>%
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+lake_species_metrics
+
+#what about by various groupings?
+
+loo_lakes <- left_out_data %>% 
+  distinct(dow, spec, lake_status, species_present, species_case)
+
+lake_species_compare <- lake_species_compare %>% 
+  left_join(loo_lakes)
+
+metrics <- lake_species_compare %>%
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  group_by(lake_status) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+metrics
+
+metrics <- lake_species_compare %>%
+  filter(lake_status != "new") %>% 
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>% 
+  group_by(species_case) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+metrics
+
+lake_species_compare %>% 
+ggplot(aes(x = mean_obs, y = mean_pred, color = lake_status)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("orange", "navyblue")) +
+  labs(
+    x = "Observed Hg",
+    y = "Predicted Hg",
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+#ggsave("lake_average_scatter.jpg")
+
+lake_species_compare %>%
+  group_by(spec) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = 0.22, linetype = "dashed") +
+  facet_wrap(~spec, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+lake_species_compare %>%
+  group_by(spec) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = 0.22, linetype = "dashed") +
+  facet_grid(spec~lake_status, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentration") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+#ggsave("lake_average_loo_compare.jpg", height = 5, width = 6)
+
+#lets filter for where the partial miss to see how viz how badly 
+lake_species_compare %>%
+  filter(mean_obs <= .lower | mean_obs >= .upper) %>% 
+  group_by(spec) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = 0.22, linetype = "dashed") +
+  facet_grid(spec~lake_status, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+#ggsave("lake_average_loo_misses.jpg", height = 5, width = 6)
+
+#how many times do we estimate it is over?
+#here we look at cases where the actual mean wasn't in the intervals
+# we look at when the actual value was over and under the interval
+# we look at cases where the predicted value was over 0.22 but it was obs under
+# we look at cases where the obs
+miss <- lake_species_compare %>%
+  summarise(sum_under = sum(mean_obs <= .lower),
+            sum_over = sum(mean_obs >= .upper),
+            pred_error_over = sum(mean_pred >= 0.22 & mean_obs <= 0.22),
+            pred_error_under = sum(mean_pred <= 0.22 & mean_obs >= 0.22),
+            n = n(),
+            prop_error_over = pred_error_over/n,
+            prop_error_under = pred_error_under/n)
+miss
+
+#clean up work space
+rm(metrics, miss, error_metrics, error_metrics_backtransformed, predictions_summary, predictions_summary_original, predictions_summary_spec, predictions_summary_spec_org, lake_species_compare, lake_species_metrics)
+```
+
