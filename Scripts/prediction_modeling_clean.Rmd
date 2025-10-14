@@ -308,7 +308,6 @@ left_out_data <- hg.model %>%
 rm(hg.data.loo_anti)
 ```
 
-
 # random effects model
 ```{r}
 # fit <- brm(log_hg ~ 
@@ -413,7 +412,6 @@ left_out_data %>%
 rm(train_lakes, train_species_by_lake)
 ```
 
-
 # complete lake leave out - predictive metric summary
 ```{r}
 #making grouping variable for lakes with complete leave out
@@ -471,6 +469,17 @@ error_metrics_backtransformed <- predictions_summary_original %>%
     avg_pred_sd = mean(.pred_sd, na.rm = T)
   )
 error_metrics_backtransformed
+
+#confusion matrix
+predictions_summary_original %>% 
+  #filter(lake_loo == "y") %>% 
+  mutate(obs_harmful = case_when(hgppm >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(.prediction >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful) %>% 
+  count()
 ```
 
 # compelte lake leave out - predictive plots
@@ -603,6 +612,16 @@ error_metrics_backtransformed <- predictions_summary_spec_org %>%
     avg_pred_sd = mean(.pred_sd, na.rm = T)
   )
 error_metrics_backtransformed
+
+predictions_summary_spec_org %>% 
+  filter(species_case == "partial_wae_or_nop") %>% 
+  mutate(obs_harmful = case_when(hgppm >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(.prediction >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful) %>% 
+  count()
 ```
 
 # species leave out - plots
@@ -701,6 +720,26 @@ lake_species_compare %>%
     coverage = mean(within_interval, na.rm = TRUE),
     avg_interval_width = mean(interval_width, na.rm = TRUE)
   )
+
+#confusion matrix - overall
+lake_species_compare %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful) %>% 
+  count()
+
+lake_species_compare %>% 
+  filter(species_case == "partial_wae_or_nop") %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful) %>% 
+  count()
 
 lake_species_compare %>% 
 ggplot(aes(x = mean_obs, y = mean_pred)) +
