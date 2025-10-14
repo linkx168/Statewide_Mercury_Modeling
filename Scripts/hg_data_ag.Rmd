@@ -18,18 +18,19 @@ library(mnsentinellakes)
 # Data
 ```{r}
 #mercury
-mn_dnr <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv"))
+mn_dnr <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv"))
 
-glifwc <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg.csv"))
+glifwc <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg.csv"))
 
 #covariate
-mglp <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MGLP_landuse_clarity_color_mercury_MI_MN_WI.csv"))
+mglp <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MGLP_landuse_clarity_color_mercury_MI_MN_WI.csv"))
 
 #mn zm data
-mn_zm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv"))
+mn_zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv"))
 ```
 
 # Ag
+Looks like this aggregation assumes all glifwc samples in MN were duplicates in the state data and I only take the Wisconsin samples from GLIFWC. 
 ```{r}
 #get glifwc and mn data together
 glifwc_merge <- glifwc %>% 
@@ -179,7 +180,6 @@ mn_data <- hg_data %>%
 write_csv(mn_data, "mn_lakes_hg_covariates.csv")
 ```
 
-
 # data coverage
 ```{r}
 hg_data %>% 
@@ -250,7 +250,17 @@ wi_hg <- bind_rows(wi_1, wi_2, wi_3, wi_4) %>%
   clean_names() %>% 
   select(location_code:qualifier) %>% 
   mutate(sample_date = mdy(sample_date))
-write_csv(wi_hg, "wi_hg_26NOV2024.csv")
+#write_csv(wi_hg, "wi_hg_26NOV2024.csv")
+wi_hg <- read_csv(file.path("G:", 
+                             "Shared drives", 
+                             "Hansen Lab", 
+                             "RESEARCH PROJECTS", 
+                             "Statewide mercury modeling", 
+                             "Data", 
+                             "Mercury Data", 
+                             "WI",
+                             "wi_hg_26NOV2024.csv"))
+
 glimpse(wi_hg)
 
 #exploring the data
@@ -292,7 +302,7 @@ wi_hg %>%
 
 #wi zm lakes 
 wi_zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "WI_ZM_lakes.csv")) %>% 
-  clean_names() %>% 
+  janitor::clean_names() %>% 
   mutate(wbic_clean = str_pad(waterbody_id_code_wbic, width = 7, side = "left", pad = "0")) %>% 
   select(species,
          status,
@@ -461,5 +471,128 @@ ssw_lakes <- zm_ssw_lakes %>%
 
 ssw_hg <- hg %>% 
   right_join(ssw_lakes)
+```
+
+#can we assume overlap of MN and WI state data?
+```{r}
+wi_hg <- read_csv(file.path("G:", 
+                             "Shared drives", 
+                             "Hansen Lab", 
+                             "RESEARCH PROJECTS", 
+                             "Statewide mercury modeling", 
+                             "Data", 
+                             "Mercury Data", 
+                             "WI",
+                             "wi_hg_26NOV2024.csv"))
+
+mn_dnr <- read_csv(file.path("G:",
+                             "Shared drives",
+                             "Hansen Lab",
+                             "RESEARCH PROJECTS",
+                             "Statewide mercury modeling",
+                             "Data",
+                             "Mercury Data",
+                             "allfish_data_04042024_JLO.csv"))
+
+glifwc <- read_csv(file.path("G:",
+                             "Shared drives",
+                             "Hansen Lab",
+                             "RESEARCH PROJECTS",
+                             "Statewide mercury modeling",
+                             "Data",
+                             "Mercury Data",
+                             "glifwc_hg.csv"))
+
+###############################################################################
+glifwc %>% 
+  group_by(state) %>% 
+  count()
+
+glifwc %>% 
+  filter(state == "MN") %>% 
+  group_by(waterbody, year(sample_date)) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+mn_dnr %>% 
+  filter(OWNER == "GLIFWC") %>% 
+  filter(WATERWAY == "MILLE LACS" & SPEC == "WAE") %>% 
+  group_by(YEARCOLL) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+glifwc %>% 
+  filter(str_detect("MILLE LACS L", waterbody)) %>% 
+  group_by(year(sample_date)) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#looks like the glifwc data is more complete than what the state has 
+
+mn_dnr %>% 
+  filter(OWNER == "GLIFWC") %>% 
+  group_by(WATERWAY) %>% 
+  count()
+
+glifwc %>% 
+  filter(state == "MN") %>% 
+  group_by(waterbody) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+wi_hg %>% 
+  filter(collector == "GLIFWC") %>% 
+  group_by(wmu_name) %>% 
+  count()
+
+glifwc %>% 
+  filter(state == "WI") %>% 
+  group_by(waterbody) %>% 
+  count() %>% 
+  print(n = nrow(.))
+```
+
+
+# exploring expanded data
+```{r}
+glifwc <- read_csv(file.path("G:", 
+                             "Shared drives", 
+                             "Hansen Lab", 
+                             "RESEARCH PROJECTS", 
+                             "Statewide mercury modeling", 
+                             "Data", "Mercury Data", 
+                             "glifwc_hg.csv"))
+
+glifwc %>% 
+  group_by(spp_code) %>% 
+  summarise(min_year = min(year),
+            max_year = max(year))
+
+glifwc %>% 
+  summarise(n_lakes = n_distinct(waterbody))
+rm(glifwc)
+
+wi <- read_csv(file.path("G:", 
+                             "Shared drives", 
+                             "Hansen Lab", 
+                             "RESEARCH PROJECTS", 
+                             "Statewide mercury modeling", 
+                             "Data", 
+                             "Mercury Data", 
+                             "WI",
+                             "wi_hg_26NOV2024.csv"))
+
+wi %>% 
+  mutate(year = year(sample_date)) %>% 
+  group_by(sample_type) %>% 
+  summarise(min = min(year),
+            max = max(year),
+            n = n())
+
+wi %>% 
+  summarise(n_lakes = n_distinct(wbic))
+
+wi %>% 
+  group_by(location_type) %>% 
+  count()
 ```
 

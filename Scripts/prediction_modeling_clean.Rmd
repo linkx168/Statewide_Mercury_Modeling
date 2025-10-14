@@ -342,7 +342,7 @@ predictions <- left_out_data %>%
 
 #write_csv(predictions, "predictions_left_out.csv")
 
-predictions <- read_csv("predictions_left_out.csv")
+predictions <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out.csv"))
 ```
 
 # summary from predictions 
@@ -406,7 +406,7 @@ left_out_data <- left_out_data %>%
 
 
 left_out_data %>%
-  distinct(dow, .keep_all = T) %>% 
+  distinct(dow, spec, .keep_all = T) %>% 
   group_by(species_case) %>% 
   count()
 
@@ -840,7 +840,8 @@ metrics <- lake_species_compare %>%
     MAE = mean(error, na.rm = TRUE),
     RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
     coverage = mean(within_interval, na.rm = TRUE),
-    avg_interval_width = mean(interval_width, na.rm = TRUE)
+    avg_interval_width = mean(interval_width, na.rm = TRUE),
+    med_interval_width = median(interval_width)
   )
 metrics
 
@@ -932,5 +933,32 @@ miss
 
 #clean up work space
 rm(metrics, miss, error_metrics, error_metrics_backtransformed, predictions_summary, predictions_summary_original, predictions_summary_spec, predictions_summary_spec_org, lake_species_compare, lake_species_metrics)
+```
+
+#visualize predictive metrics
+```{r}
+# hard coding the data
+
+df <- tribble(
+  ~level, ~leave_out_type, ~leave_out_value, ~MAE, ~RMSE, ~coverage, ~interval_width,
+  "fish", "whole lake", "no", 0.10, 0.15, 0.91, 0.50,
+  "fish", "whole lake", "yes", 0.16, 0.28, 0.98, 0.89,
+  "fish", "species lake", "no WAE/NOP", 0.12, 0.19, 0.87, 0.59,
+  "fish", "species lake", "WAE/NOP", 0.09, 0.14, 0.93, 0.47,
+  "lake-spec average", "whole lake", "no", 0.05, 0.08, 0.78, 0.19,
+  "lake-spec average", "whole lake", "yes", 0.14, 0.25, 0.95, 0.63,
+  "lake-spec average", "species lake", "no WAE/NOP", 0.08, 0.12, 0.82, 0.31,
+  "lake-spec average", "species lake", "WAE/NOP", 0.05, 0.07, 0.77, 0.16
+)
+
+df %>%
+  pivot_longer(cols = c(MAE, RMSE, coverage, interval_width),
+               names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = leave_out_type, y = value, fill = leave_out_value)) +
+  geom_col(position = position_dodge()) +
+  facet_grid(metric~level, scales = "free_y") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+#ggsave("predictive_metrics.jpg", height = 8, width = 6)
 ```
 
