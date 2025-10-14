@@ -721,26 +721,6 @@ lake_species_compare %>%
     avg_interval_width = mean(interval_width, na.rm = TRUE)
   )
 
-#confusion matrix - overall
-lake_species_compare %>% 
-  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
-                                 TRUE ~ "n"),
-         pred_harmful = case_when(mean_pred >= .22 ~ "y",
-                                  TRUE ~ "n")) %>% 
-  group_by(obs_harmful,
-           pred_harmful) %>% 
-  count()
-
-lake_species_compare %>% 
-  filter(species_case == "partial_wae_or_nop") %>% 
-  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
-                                 TRUE ~ "n"),
-         pred_harmful = case_when(mean_pred >= .22 ~ "y",
-                                  TRUE ~ "n")) %>% 
-  group_by(obs_harmful,
-           pred_harmful) %>% 
-  count()
-
 lake_species_compare %>% 
 ggplot(aes(x = mean_obs, y = mean_pred)) +
   geom_point(alpha = 0.7, size = 2) +
@@ -849,6 +829,37 @@ loo_lakes <- left_out_data %>%
 
 lake_species_compare <- lake_species_compare %>% 
   left_join(loo_lakes)
+
+#confusion matrix - overall
+lake_species_compare %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful) %>% 
+  count()
+
+lake_species_compare %>% 
+  filter(lake_status == "new") %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful) %>% 
+  count()
+
+lake_species_compare %>% 
+  filter(species_case == "partial_no_wae_nop") %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful) %>% 
+  count()
+
 
 metrics <- lake_species_compare %>%
   mutate(
