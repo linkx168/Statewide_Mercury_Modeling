@@ -1012,3 +1012,74 @@ df %>%
 #ggsave("predictive_metrics.jpg", height = 8, width = 6)
 ```
 
+# map of data
+```{r}
+library(arrow)
+library(sf)
+library(maps)
+#first read in fisheries database to get coordinates
+coords <- open_dataset(file.path("G:", 
+                                  "Shared drives", 
+                                  "Hansen Lab", 
+                                  "RESEARCH PROJECTS", 
+                                  "Fish Survey Data", 
+                                  "Parquet files", 
+                                  "hive_update"),partitioning = "state") %>% 
+  filter(!is.na(nhdhr_id), !is.na(lake_id), !is.na(latitude_lake_centroid)) %>% 
+  distinct(state, nhdhr_id, lake_id, latitude_lake_centroid, longitude_lake_centroid) %>% 
+  collect() %>% 
+  filter(state == "Minnesota") %>% 
+  rename(dow = lake_id) %>% 
+  mutate(dow = case_when(str_length(dow) == 7 ~ str_c("0", dow),
+                         TRUE ~ dow))
+
+hg.model <- hg.model %>% 
+  left_join(coords %>% 
+              select(dow, latitude_lake_centroid, longitude_lake_centroid), by = "dow")
+
+hg.model %>% 
+  filter(is.na(latitude_lake_centroid)) %>% 
+  group_by(dow) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#there are three lakes here that never got a fisheries survey but have gotten mercury sampled, I guess let's just hard code them for now
+
+hg.model <- hg.model %>% 
+  mutate(latitude_lake_centroid = case_when(is.na(latitude_lake_centroid) & dow == "19007800" ~ 44.857618,
+                                            is.na(latitude_lake_centroid) & dow == "03048900" ~ 46.752876,
+                                            is.na(latitude_lake_centroid) & dow == "09003600" ~ 46.689051,
+                                            TRUE ~ latitude_lake_centroid),
+         longitude_lake_centroid = case_when(is.na(longitude_lake_centroid) & dow == "19007800" ~ -93.19346,
+                                             is.na(longitude_lake_centroid) & dow == "03048900" ~ -95.936587,
+                                             is.na(longitude_lake_centroid) & dow == "09003600" ~ -92.671952,
+                                             TRUE ~ longitude_lake_centroid))
+
+data_for_map <- hg.model %>% 
+  group_by(dow, latitude_lake_centroid, longitude_lake_centroid) %>% 
+  summarise(n_samples = n(),
+            n_spec = n_distinct(spec))
+
+# making map
+states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+  filter(ID %in% c("minnesota"))
+
+data_for_map <- data_for_map %>%
+  st_as_sf(coords = c("longitude_lake_centroid", "latitude_lake_centroid"), 
+           crs = 4326) 
+
+ggplot() +
+  geom_sf(data = states, fill = "white", color = "black") +
+  geom_sf(data = data_for_map, aes(size = n_samples, color = n_spec)) +
+  scale_size(name = "Number of Samples") +
+  scale_color_viridis_c(option = "plasma", name = "Number of Species") +
+  theme_minimal() +
+  theme(legend.position = c(.78,.38),
+        legend.title.align =  0.5,
+        legend.key.height = unit(0.3, "cm"),
+        legend.key.width  = unit(0.3, "cm"),
+        legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8))
+#ggsave("map_pred_samples.jpg", height = 6, width = 5, dpi = 600)
+rm(states, data_for_map, coords)
+```
+
