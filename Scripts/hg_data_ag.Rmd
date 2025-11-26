@@ -30,12 +30,12 @@ mn_zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJE
 ```
 
 # Ag
-Looks like this aggregation assumes all glifwc samples in MN were duplicates in the state data and I only take the Wisconsin samples from GLIFWC. 
+This aggregation assumes all glifwc samples in MN were duplicates in the state data - I only take the Wisconsin samples from GLIFWC. 
 ```{r}
 #get glifwc and mn data together
 glifwc_merge <- glifwc %>% 
   #for the sake of ease I'm going to assume all mn samples are duplicates and throw them out
-  filter(state != "MN")
+  filter(!(state %in% c("MN", "WI")))
 
 mn_dnr_merge <- mn_dnr %>% 
   #removes samples with no hg, length, or dow data
@@ -98,45 +98,123 @@ rm(mn_dnr,
    glifwc,
    glifwc_merge)
 
-mglp_merge <- mglp %>% 
-  lagos_to_nhdhr(from_colname = "lagoslakeid") %>% 
-  mutate(nhdhr.id = paste0("nhdhr_", nhdhr.id)) %>% 
-  select(nhdhr.id,
-         lake_area_ha,
-         nws_area_ha,
-         clarity_m_Corson_Dosch,
-         secchi_depth_m_LAGOS_LIMNO,
-         colora_pcu_LAGOS_LIMNO,
-         colort_pcu_LAGOS_LIMNO,
-         nws_nlcd_devhi24_pct,
-         nws_nlcd_fordec41_pct,
-         nws_nlcd_wetemerg95_pct)
+wi_hg <- read_csv(file.path("G:", 
+                             "Shared drives", 
+                             "Hansen Lab", 
+                             "RESEARCH PROJECTS", 
+                             "Statewide mercury modeling", 
+                             "Data", 
+                             "Mercury Data", 
+                             "WI",
+                             "wi_hg_26NOV2024.csv"))
+wi_hg_merge <- wi_hg %>% 
+  mutate(state = "WI", 
+         waterbody = primary_site,
+         state_id = gsub("_", "",wbic),
+         state_id = case_when(state_id == "" ~ NA,
+                              TRUE ~ state_id),
+         state_id = as.numeric(state_id),
+         year = year(sample_date),
+         spp_code = sample_type,
+         sample_type = sample_form,
+         num_fish_in_sample = number_of_fish,
+         length_in = avg_length_in,
+         wt_lbs = avg_body_wt_kg*2.2,
+         sex = gender,
+         hg_ppm = mercury_ug_g,
+         hg_code = NA,
+         hg_lab = NA,
+         hg_notes = comments) %>% 
+  local_to_lagos(from_colname = "state_id", states = "wi") %>%
+  local_to_nhdhr(from_colname = "state_id", states = "wi") %>% 
+  rename(lagoslakeid = lagos.id) %>% 
+  select(state,
+         county,
+         waterbody,
+         state_id,
+         lagoslakeid,
+         nhdhr.id,
+         sample_date,
+         year,
+         spp_code,
+         sample_type,
+         num_fish_in_sample,
+         length_in,
+         wt_lbs,
+         age,
+         sex,
+         hg_ppm,
+         hg_code,
+         hg_lab,
+         hg_notes)
 
-hg_data <- hg_data %>% 
-  left_join(mglp_merge, by = "nhdhr.id")
-rm(mglp,
-   mglp_merge)
+hg_data <- bind_rows(wi_hg_merge, hg_data) 
+rm(wi_hg, wi_hg_merge)
+rm(mglp)
 
-#adding zm data
-mn_zm_merge <- mn_zm %>% 
-  filter(!is.na(MNDOW_ID)) %>% 
-  mutate(DOW = as.character(gsub("mndow_", "", MNDOW_ID)),
-         nhdid = NHD_ID) %>% 
-  select(DOW,
-         Year_Infested)  %>% 
-  mutate(zm_lag_year_infested = Year_Infested +2) %>% 
-  rename(state_id = DOW,
-         year_infested_zm = Year_Infested,
-         year_infested_zm_lag = zm_lag_year_infested) 
+##########STOPPED RIGHT HERE, I have to figure out this join################
 
-hg_data <- hg_data %>% 
-  left_join(mn_zm_merge, by = "state_id") %>% 
-  mutate(zm_lake = case_when(is.na(year_infested_zm) ~ "n",
-                             TRUE ~ "y"),
-         zm_sample_lag = case_when(year_infested_zm_lag <= year ~ "y",
-                               TRUE ~ "n"),
-         time_since_invasion = year - year_infested_zm)
-rm(mn_zm, mn_zm_merge)
+
+# read in covariate data from lagos
+lagos <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lagos_covarites_all_lakes_mn_wi_mi_23oct2025.csv"))
+
+lagos <- lagos %>% 
+  filter(!is.na(lake_nhdid)) %>% 
+  distinct(lake_nhdid, .keep_all = T)
+
+hg_data.check <- hg_data %>% 
+  filter(!is.na(nhdhr.id)) %>% 
+  select(-state,
+         -lagoslakeid) %>% 
+  rename(lake_nhdid = nhdhr.id) %>% 
+  left_join(lagos, by = c("lake_nhdid"))
+
+#checking hg data
+hg_data.check %>% 
+  mutate(no_lagos = case_when(is.na(nlcd_openwater11_pct) ~ "y",
+                              TRUE ~ "n")) %>% 
+  filter(no_lagos == "y") %>% 
+  distinct(lake_nhdid, lake_id, state)
+
+# mglp_merge <- mglp %>% 
+#   lagos_to_nhdhr(from_colname = "lagoslakeid") %>% 
+#   mutate(nhdhr.id = paste0("nhdhr_", nhdhr.id)) %>% 
+#   select(nhdhr.id,
+#          lake_area_ha,
+#          nws_area_ha,
+#          clarity_m_Corson_Dosch,
+#          secchi_depth_m_LAGOS_LIMNO,
+#          colora_pcu_LAGOS_LIMNO,
+#          colort_pcu_LAGOS_LIMNO,
+#          nws_nlcd_devhi24_pct,
+#          nws_nlcd_fordec41_pct,
+#          nws_nlcd_wetemerg95_pct)
+# 
+# hg_data <- hg_data %>% 
+#   left_join(mglp_merge, by = "nhdhr.id")
+# rm(mglp,
+#    mglp_merge)
+# 
+# #adding zm data
+# mn_zm_merge <- mn_zm %>% 
+#   filter(!is.na(MNDOW_ID)) %>% 
+#   mutate(DOW = as.character(gsub("mndow_", "", MNDOW_ID)),
+#          nhdid = NHD_ID) %>% 
+#   select(DOW,
+#          Year_Infested)  %>% 
+#   mutate(zm_lag_year_infested = Year_Infested +2) %>% 
+#   rename(state_id = DOW,
+#          year_infested_zm = Year_Infested,
+#          year_infested_zm_lag = zm_lag_year_infested) 
+# 
+# hg_data <- hg_data %>% 
+#   left_join(mn_zm_merge, by = "state_id") %>% 
+#   mutate(zm_lake = case_when(is.na(year_infested_zm) ~ "n",
+#                              TRUE ~ "y"),
+#          zm_sample_lag = case_when(year_infested_zm_lag <= year ~ "y",
+#                                TRUE ~ "n"),
+#          time_since_invasion = year - year_infested_zm)
+# rm(mn_zm, mn_zm_merge)
 ```
 
 #products
@@ -359,10 +437,13 @@ wi_hg_zm %>%
             min_n = min(n))
 ```
 
-#future study lakes?
+# 2025 continuation data exploration
 ```{r}
-zm_ssw <- read_csv("Data/zm_ssw_2025.csv")
-hg <- read_csv("Data/allfish_data_04042024_JLO.csv")
+zm_ssw <- read_csv("Data/zm_ssw_2025.csv") %>% 
+  filter(!is.na(dow)) %>% 
+  filter(!(dow %in% c("na", "none"))) %>% 
+  distinct()
+hg <- read_csv("Data/allfish_data_04042024_JLO.csv") 
 
 #fix invasion data
 clean_lake_ids <- function(id) {
@@ -384,14 +465,48 @@ clean_lake_ids <- function(id) {
   return(id_clean)
 }
 
-zm_ssw %>% 
-  filter(lake_name == "North Twin")
-clean_lake_ids()
 
 zm_ssw <- zm_ssw %>% 
   mutate(dow = sapply(dow, clean_lake_ids))
 rm(clean_lake_ids)
 
+zm_ssw <- zm_ssw %>% 
+  select(dow, ais, year_infested) %>% 
+  pivot_wider(names_from = ais,
+              values_from = year_infested) %>% 
+  rename(zm_year_infested = `zebra mussel`,
+         ssw_year_infested = `starry stonewort`)
+
+clean_dowid <- function(id) {
+  if (is.na(id) || id == "") return(NA_character_)  # Handle NA values
+  id_clean <- str_replace_all(id, "-", "")  # Remove dashes
+  return(id_clean)
+}
+
+hg <- hg %>% 
+  mutate(dow = map_chr(DOWID, clean_dowid)) %>% 
+  mutate(dow = case_when(dow == "56074701" | dow == "56074702" ~ "56074700",
+                         dow == "73020000" | dow == "73020002" ~ "73020000",
+                         TRUE ~ dow)) 
+rm(clean_dowid)
+
+#zm and starry lake hg
+zm_ssw_hg <- zm_ssw %>% 
+  inner_join(hg)
+
+ais_lakes <- zm_ssw_hg %>% 
+  distinct(dow, YEARCOLL, SPEC, zm_year_infested, ssw_year_infested) %>% 
+  mutate(pre_ssw = case_when(YEARCOLL < ssw_year_infested ~ "y",
+                             TRUE ~ "n"),
+         post_ssw = case_when(YEARCOLL > ssw_year_infested ~ "y",
+                             TRUE ~ "n"),
+         pre_zm = case_when(YEARCOLL < zm_year_infested ~ "y",
+                             TRUE ~ "n"),
+         post_zm = case_when(YEARCOLL > zm_year_infested ~ "y",
+                             TRUE ~ "n"))
+write_csv(ais_lakes, "dnr_hg_invasion.csv")
+
+############################################################
 #getting study lakes
 study_dows <- c(49007900, 47004901, 3057600, 29018500, 1006200, 21014500, 86025200,
           34007900, 11030500, 11035800, 3015300, 73020000, 11016700, 3047500,
@@ -594,5 +709,44 @@ wi %>%
 wi %>% 
   group_by(location_type) %>% 
   count()
+
+
 ```
 
+# pulling lake info for MASIC for BACI analysis - data came the clean BACI script
+```{r}
+library(arrow)
+lakes <- combined_data %>% 
+  distinct(lake_name, lake_id, centroid_lat, centroid_lon, year_infested, zm_lake)
+
+mw_county <- open_dataset(file.path("G:",
+                                    "Shared drives",
+                                    "Hansen Lab",
+                                    "RESEARCH PROJECTS",
+                                    "Fish Survey Data",
+                                    "Parquet Files",
+                                    "hive_update"),
+                          partitioning = "state") %>% 
+  filter(state == "Minnesota")
+
+mw_county <- mw_county %>% 
+  filter(!is.na(lake_id)) %>% 
+  filter(!is.na(county)) %>% 
+  distinct(lake_id, county) %>% 
+  collect()
+
+mw_county <- mw_county %>% 
+  mutate(lake_id = as.character(lake_id),
+         lake_id = case_when(nchar(lake_id) == 7 ~ paste0("0", lake_id),
+                             TRUE ~ lake_id))
+
+lakes <- lakes %>% 
+  left_join(mw_county)
+
+lakes <- lakes %>% 
+  mutate(county = case_when(lake_id == "70012000" ~ "Scott",
+                            lake_id == "47004900" ~ "Meeker",
+                            lake_id == "56076000" ~ "Otter Tail",
+                            TRUE ~ county))
+write_csv(lakes,"zm_hg_lakes.csv")
+```

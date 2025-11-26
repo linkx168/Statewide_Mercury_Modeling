@@ -909,3 +909,188 @@ pool_3 %>%
   geom_smooth(aes(LGTHIN, HGPPM))
 ```
 
+# looking at covarites
+Find the metadata for the lagos data here
+https://portal.edirepository.org/nis/metadataviewer?packageid=edi.854.1
+-the zoneid is equvilate to the lagos id
+
+```{r}
+#first lets readin all of the relivent data
+xwalk <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_link.csv"))
+glimpse(xwalk)
+
+#lagos
+lagos_watershed_lulc <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lagos_watershed_lulc.csv"))
+glimpse(lagos_watershed_lulc)
+
+lagos_watershed_lulc %>% 
+  group_by(year) %>% 
+  count()
+
+lagos_watershed <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_watersheds.csv"))
+glimpse(lagos_watershed)
+
+##############################################################################
+#creating crosswalk for fish lakes in the CASC database
+mw_data <- open_dataset(sources = file.path("G:",
+                                            "Shared drives",
+                                            "Hansen Lab",
+                                            "RESEARCH PROJECTS",
+                                            "Fish Survey Data",
+                                            "Parquet files",
+                                            "hive_update"), partitioning = c("state"))
+mw_data %>% 
+   filter(!is.na(lake_name) & !is.na(nhdhr_id) & !is.na(lake_id)) %>% 
+   filter(state == "Minnesota") %>% 
+   distinct(lake_name, nhdhr_id, lake_id) %>% 
+   collect() %>% 
+   filter(str_detect(lake_name, "tonka")) %>% 
+   distinct(lake_name, nhdhr_id, lake_id)
+
+lake_ids <- mw_data %>% 
+  select(state, nhdhr_id, lake_id) %>% 
+  filter(!is.na(nhdhr_id) & !is.na(lake_id)) %>% 
+  distinct(state, nhdhr_id, lake_id) %>% 
+  collect() 
+rm(mw_data)
+
+##############################################################################
+#combine watershed data
+lagos_watershed_lulc %>% 
+  group_by(year) %>% 
+  summarise(n = n(),
+            n_lakes = n_distinct(zoneid))
+
+
+most_recent_landcover <- lagos_watershed_lulc %>% 
+  filter(year == 2016) %>% 
+  select(-spatial_division,
+         -year,
+         -datacoveragepct,
+         -precision) %>% 
+  rename(lagoslakeid = zoneid)
+rm(lagos_watershed_lulc)
+
+lagos_watershed %>% 
+  select(lagoslakeid,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         ws_states)
+##########################################################################
+#quick look at where there is not landcoverdata
+bad <- lagos_watershed %>% 
+  anti_join(most_recent_landcover) %>% 
+  distinct(lagoslakeid)
+
+library(maps)
+
+us <- map_data("state")
+
+xwalk %>% 
+  filter(lagoslakeid %in% bad$lagoslakeid) %>% 
+  ggplot() +
+  geom_polygon(data = us, aes(x = long, y = lat, group = group),
+               fill = "white", color = "black") +
+  geom_point(aes(x = lake_lon_decdeg, y = lake_lat_decdeg),
+             color = "red", size = 2, alpha = 0.7) +
+  coord_quickmap(xlim = c(-125, -66), ylim = c(25, 50)) +
+  theme_minimal()
+rm(us, bad)
+#looks like we will have some trouble with border waters in MN
+###############################################################################
+#lets just filter for the states we care about to save some memory
+covary <- lagos_watershed %>% 
+  left_join(most_recent_landcover) %>% 
+  mutate(state_keep = case_when(str_detect("MN", ws_states) ~ "y",
+                                str_detect("WI", ws_states) ~ "y",
+                                str_detect("MI", ws_states) ~ "y",
+                                TRUE ~ "n")) %>% 
+  filter(state_keep == "y")
+
+rm(lagos_lake_chr,
+   lagos_watershed,
+   lagos_watershed_lulc,
+   most_recent_landcover)
+
+covary %>% 
+  filter(is.na(nlcd_devopen21_pct)) %>% 
+  group_by(ws_states) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+covary %>% 
+  filter(is.na(nlcd_devopen21_pct)) 
+
+#############################################################################
+#lets use the lagos crosswalk to get to nhdhrid to then connect to fish lakes
+xwalk <- xwalk %>% 
+  distinct(lagoslakeid,
+         lake_nhdid,
+         lake_namegnis,
+         lake_namelagos,
+         lake_lat_decdeg,
+         lake_lon_decdeg)
+
+covary <- covary %>% 
+  left_join(xwalk, relationship = "one-to-one")
+rm(xwalk)
+############################################################################
+#now lets connect to fish lakes
+lake_ids <- lake_ids %>% 
+  rename(lake_nhdid = nhdhr_id) %>% 
+  mutate(lake_nhdid = gsub("nhdhr_", "", lake_nhdid))
+
+covary <- covary %>% 
+  left_join(lake_ids, relationship ="one-to-many")
+rm(lake_ids)
+#############################################################################
+#final_product
+covary <- covary %>% 
+  select(ws_states,
+         state,
+         lake_nhdid,
+         lagoslakeid,
+         lake_id,
+         lake_namegnis,
+         lake_namelagos,
+         ws_lat_decdeg,
+         ws_lon_decdeg,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         contains("nlcd"))
+
+###now we have some clean up
+#state
+covary %>% 
+  group_by(ws_states) %>% 
+  count()
+
+covary <- covary %>% 
+  mutate(state = case_when(ws_states == "MN" ~ "Minnesota",
+                           ws_states == "WI" ~ "Wisconsin",
+                           TRUE ~ "Michigan")) %>% 
+  select(-ws_states)
+
+covary <- covary %>% 
+  mutate(lake_name = case_when(is.na(lake_namegnis) ~ lake_namelagos,
+                               is.na(lake_namelagos) ~ lake_namegnis,
+                               TRUE ~ lake_namelagos)) %>% 
+  select(-lake_namegnis,
+         -lake_namelagos) %>% 
+  relocate(lake_name, .after = lake_id)
+write_csv(covary, "lagos_covarites_all_lakes_mn_wi_mi_23oct2025.csv")
+```

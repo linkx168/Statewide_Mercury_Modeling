@@ -1083,3 +1083,238 @@ ggplot() +
 rm(states, data_for_map, coords)
 ```
 
+# Hot Spot Map
+1. create dataframe for lakes that we want to predict to 
+    -read in dnr covaraite data and join other dataframes
+    -filter out any NA values 
+    -scale covar to what was modeled
+    -change zm_lake to zm_sample so that predictions are for when the lake was invaded
+```{r}
+########dataframe for lakes we would like to predict########################
+dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+  mutate(logit_wetlands = car::logit(Percent_Wetland),
+         logit_urban = car::logit(Percent_Urban),
+         logit_ag = car::logit(Percent_Cultivated_Crops),
+         log_WS_Lake_Ratio = log(WS_Lake_Ratio))
+
+zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv")) %>% 
+  filter(!is.na(DOW))  %>% 
+  mutate(DOW = as.character(gsub("-", "", DOW))) %>% 
+  select(DOW,
+         Year_Infested) %>% 
+  mutate(zm_lag_year_infested = Year_Infested +2)
+
+glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+  filter(state == "MN") %>% 
+  rename(nhdid = site_id) %>% 
+  mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
+  mutate(clarity = case_when(is.infinite(clarity) ~ NA,
+                             TRUE ~ clarity)) %>% 
+  mutate(log_area = log(area))
+
+#lake link
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
+
+#converting coordinates to sf to get easting and northing
+lake_link_sf <- lake_link %>% 
+  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326) %>% 
+  st_transform(crs = 32615)
+utm_coords <- st_coordinates(lake_link_sf)
+lake_link <- lake_link %>%
+  mutate(easting = utm_coords[, 1]/1000,
+         northing = utm_coords[, 2]/1000)
+#utm values in km instead of m
+rm(lake_link_sf, utm_coords)
+#############################################################################
+
+pred_data <- left_join(dnr_covary, zm)
+pred_data <- pred_data %>% 
+  local_to_nhdhr(from_colname = "DOW", states = "mn") %>% 
+  mutate(nhdid = str_remove(nhdhr.id, "nhdhr_")) %>% 
+  select(-nhdhr.id) %>% 
+  relocate(nhdid, .after = DOW)
+pred_data <- left_join(pred_data, glm)
+pred_data <- left_join(pred_data, lake_link)
+
+pred_data <- pred_data %>% 
+  select(DOW,
+         nhdid,
+         Total_Wetland_Hectares,
+         Percent_Wetland,
+         Percent_Urban,
+         Percent_Cultivated_Crops,
+         logit_wetlands,
+         logit_urban,
+         logit_ag,
+         WS_Lake_Ratio,
+         log_WS_Lake_Ratio,
+         centroid_lat,
+         centroid_lon,
+         max_depth,
+         area,
+         log_area,
+         elevation,
+         clarity,
+         Year_Infested,
+         zm_lag_year_infested,
+         lake_lat_decdeg,
+         lake_lon_decdeg,
+         easting,
+         northing) %>% 
+  mutate(zm_lake = case_when(is.na(Year_Infested) ~ "n",
+                             TRUE ~ "y")) %>% 
+  janitor::clean_names()
+rm(dnr_covary, glm, lake_link, zm)
+##############################################################################
+#now scale with original data
+#select variables that we need to scale
+scale_vars <- c("log_area",
+                "logit_wetlands",
+                "logit_urban",
+                "logit_ag",
+                "log_ws_lake_ratio")
+
+#grab scalers from original data
+scalers <- hg.model %>% 
+  select(all_of(scale_vars)) %>% 
+  summarise(across(everything(),
+                   list(mean = ~ mean(.x),
+                        sd = ~ sd(.x)))) 
+means <- scalers %>%  select(ends_with("_mean")) %>% as.list()
+sds <- scalers %>%  select(ends_with("_sd")) %>% as.list()
+names(means) <- gsub("_mean$", "", names(means))
+names(sds)   <- gsub("_sd$",   "", names(sds))
+
+#use scalers to put lakes in original data scale
+pred_data <- pred_data %>% 
+  filter(ws_lake_ratio < 100) %>% 
+  filter(!is.na(area)) %>% 
+  #linking data to lat/lon
+  mutate(dow = as.factor(dow),
+         dow = str_pad(dow, width = 8, pad = "0")) %>% 
+  ungroup() %>%
+  mutate(across(all_of(scale_vars),
+                ~ (.x - means[[cur_column()]]) / sds[[cur_column()]],
+                .names = "scaled_{col}"))
+#check if there are differences between scaled values between lakes that exist in both
+check <- hg.model %>% 
+  distinct(dow, log_area, logit_wetlands, scaled_log_area, scaled_logit_wetlands) %>% 
+  left_join(pred_data, by = "dow", suffix = c("_new", "_old")) %>% 
+  select(dow, log_area_new, log_area_old, scaled_log_area_new, scaled_log_area_old, logit_wetlands_new, logit_wetlands_old, scaled_logit_wetlands_new, scaled_logit_wetlands_old) %>% 
+  mutate(diff_area = scaled_log_area_new - scaled_log_area_old,
+         diff_wetlands = scaled_logit_wetlands_new - scaled_logit_wetlands_old)
+rm(check, sds, means, scale_vars, scalers)
+
+################################################################################
+
+pred_data <- pred_data %>% 
+  select(dow,
+         zm_sample = zm_lake,
+         scaled_log_area,
+         scaled_logit_wetlands,
+         scaled_logit_urban,
+         scaled_logit_ag,
+         scaled_log_ws_lake_ratio)
+
+pred_spec <- tibble(spec = c("WAE",
+                             "NOP",
+                             "BLC",
+                             "LMB",
+                             "BLG",
+                             "WTS",
+                             "YEP"),
+                    length = c(15,
+                               24,
+                               8.1,
+                               12,
+                               6.1,
+                               12,
+                               8.1))
+length_scalers <- hg.model %>% 
+  group_by(spec) %>% 
+  summarise( length_mean = mean(lgthin),
+             length_sd   = sd(lgthin))
+
+pred_spec <- pred_spec %>% 
+  left_join(length_scalers,by = "spec") %>% 
+  mutate(scaled_length = (length - length_mean)/length_sd)
+pred_spec
+
+#cross the datasets
+pred_full <- crossing(pred_data, pred_spec)
+rm(pred_data, pred_spec, length_scalers)
+
+#############################################################################
+#predicting at the lake-spec level 
+lake_spec_pred <- pred_full %>% 
+  add_predicted_draws(fit, ndraws = 500, allow_new_levels = TRUE)
+
+#here we have 500 draw for each row because there is only one length within each lake-spec
+lake_spec_sum <- lake_spec_pred %>% 
+  group_by(dow, spec) %>% 
+  median_qi(.prediction) %>% 
+  select(-.width, -.point, -.interval)
+
+#create four grouping for "risk" based on where the intervals and average sit relative to 0.22
+lake_spec_org <- lake_spec_sum %>% 
+  mutate(.prediction = exp(.prediction),
+         .lower = exp(.lower),
+         .upper = exp(.upper)) %>% 
+  mutate(risk = case_when(.lower >= 0.22 ~ "high",
+                          .prediction >= 0.22 & .lower < 0.22 ~ "worth a check",
+                          .prediction <= 0.22 & .upper > 0.22 ~ "yellow flag",
+                          .upper <= 0.22 ~ "low",
+                          TRUE ~ NA)) %>% 
+  local_to_nhdhr(from_colname = "dow", states = "mn") %>% 
+  mutate(nhdid = str_remove(nhdhr.id, "nhdhr_")) %>% 
+  select(-nhdhr.id)
+
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
+
+lake_spec_org <- lake_spec_org %>% 
+  left_join(lake_link)
+rm(lake_link, pred_full, lake_spec_pred, lake_spec_sum)
+
+###############################################################################
+#summary stuff
+lake_spec_org %>% 
+  group_by(spec) %>% 
+  summarise(high = sum(risk == "high"),
+            high_med = sum(risk == "worth a check"),
+            low_med = sum(risk == "yellow flag"),
+            low = sum(risk == "low"),
+            n = n())
+
+############################################################################
+#map
+lake_sf <- lake_spec_org %>%
+  ####FILTERING OUT FOR NOW BUT I THINK THERE IS CODE ABOVE TO FIX
+  filter(!is.na(lake_lat_decdeg)) %>% 
+  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326)
+
+states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+  filter(ID %in% c("minnesota"))
+
+ggplot() +
+  geom_sf(data = states, fill = "white", color = "black") +
+  geom_sf(data = lake_sf, 
+          aes(alpha = .prediction, shape = risk), 
+          color = "blue", size = 2) +
+  facet_wrap(~ spec) +
+  theme_minimal()
+```
+
+# fun summaries and plots we can make:
+-risk by species (based on where the intervals and median sits)
+-clean up the map
+- compare how our predicted risk compares to consumption guidelines
+
+#things to clean up:
+-move scaled co variate calculations to after leave out 
+    -rerun model
+-save those parameters used in that calculation
+-compare these to where the DNR has consumption advisories 
