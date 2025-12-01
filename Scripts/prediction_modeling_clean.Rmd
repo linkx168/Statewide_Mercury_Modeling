@@ -209,9 +209,6 @@ Biggest items:
 -filter for species of interest 
 -filter for years 2000-most recent
 -filter any really big watersheds out (driving some skewed covariates), these are mostly reservoirs
--scale length by species
--scale lake-level covarites
--filtering out any fish that are +/- 3 SD 
 ```{r}
 hg.model <- hg %>% 
   #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
@@ -226,19 +223,6 @@ hg.model <- hg %>%
   #linking data to lat/lon
   mutate(dow = as.factor(dow),
          dow = str_pad(dow, width = 8, pad = "0")) %>% 
-  #transforming some variables for modeling
-  group_by(spec) %>% 
-  mutate(scaled_length = c(scale(lgthin))) %>% 
-  ungroup() %>%
-  mutate(log_hg = log(hgppm),
-         scaled_log_area = c(scale(log_area)),
-         scaled_logit_wetlands = c(scale(logit_wetlands)),
-         scaled_logit_urban = c(scale(logit_urban)),
-         scaled_logit_ag = c(scale(logit_ag)),
-         scaled_log_ws_lake_ratio = c(scale(log_ws_lake_ratio)),
-         scaled_clarity = c(scale(clarity))) %>% 
-  #filtering out super long or short fish
-  filter(!(scaled_length > 3 | scaled_length < -3)) %>% 
   #filter out any NA area (this will include some border lakes that don't have xwalk)
   filter(!is.na(area))
 rm(hg)
@@ -308,6 +292,95 @@ left_out_data <- hg.model %>%
 rm(hg.data.loo_anti)
 ```
 
+#scale data prior to model
+-scale and make sure scalers are saved for prediction 
+-scale length by species
+-scale lake-level covarites
+   (make sure that we scale for each unique lake, not at the fish level)
+-filtering out any fish that are +/- 3 SD 
+```{r}
+#scale lake level data (have to get to one lake per row and then apply to fish data)
+lake_level <- hg.data.loo %>% 
+  distinct(dow, log_area, logit_wetlands, logit_urban, 
+           logit_ag, log_ws_lake_ratio)
+
+lake_scalers <- lake_level %>% 
+  summarise(
+    mean_log_area = mean(log_area),
+    sd_log_area   = sd(log_area),
+
+    mean_logit_wetlands = mean(logit_wetlands),
+    sd_logit_wetlands   = sd(logit_wetlands),
+
+    mean_logit_urban = mean(logit_urban),
+    sd_logit_urban   = sd(logit_urban),
+
+    mean_logit_ag = mean(logit_ag),
+    sd_logit_ag   = sd(logit_ag),
+
+    mean_lw_ratio = mean(log_ws_lake_ratio),
+    sd_lw_ratio   = sd(log_ws_lake_ratio),
+  )
+
+#length scalers
+length_scalers <- hg.data.loo %>% 
+  group_by(spec) %>% 
+  summarise(
+    length_mean = mean(lgthin),
+    length_sd   = sd(lgthin)
+  )
+
+######################apply scaling#################################
+#lake level
+hg.data.loo <- hg.data.loo %>%
+    mutate(scaled_log_area = (log_area - lake_scalers$mean_log_area) /lake_scalers$sd_log_area,
+           
+           scaled_logit_wetlands = (logit_wetlands - lake_scalers$mean_logit_wetlands) / lake_scalers$sd_logit_wetlands,
+           
+           scaled_logit_urban =
+      (logit_urban - lake_scalers$mean_logit_urban) / lake_scalers$sd_logit_urban,
+      
+      scaled_logit_ag =
+      (logit_ag - lake_scalers$mean_logit_ag) / lake_scalers$sd_logit_ag,
+      
+      scaled_log_ws_lake_ratio =
+      (log_ws_lake_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio) 
+
+#length scaler
+hg.data.loo <- hg.data.loo %>% 
+  left_join(length_scalers, by = "spec") %>% 
+  mutate(scaled_length = (lgthin - length_mean)/ length_sd) %>% 
+  select(-length_mean,
+         -length_sd)
+rm(lake_level)
+
+#now prep left out data to match the scaling used in prediction 
+left_out_scaled <- left_out_data %>%
+  left_join(length_scalers, by = "spec") %>% 
+  mutate(
+    # fish-level scaling (if grouped)
+    scaled_length = (lgthin - length_mean) / length_sd,
+
+    # lake-level predictors
+    scaled_log_area =
+      (log_area - lake_scalers$mean_log_area) / lake_scalers$sd_log_area,
+
+    scaled_logit_wetlands =
+      (logit_wetlands - lake_scalers$mean_logit_wetlands) / lake_scalers$sd_logit_wetlands,
+
+    scaled_logit_urban =
+      (logit_urban - lake_scalers$mean_logit_urban) / lake_scalers$sd_logit_urban,
+
+    scaled_logit_ag =
+      (logit_ag - lake_scalers$mean_logit_ag) / lake_scalers$sd_logit_ag,
+
+    scaled_log_ws_lake_ratio =
+      (log_ws_lake_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio
+  )
+rm(left_out_data)
+```
+
+
 # random effects model
 ```{r}
 # fit <- brm(log_hg ~ 
@@ -336,7 +409,7 @@ summary(fit)
 # predictions
 Now lets make predictions from the left out data and see how well we do. 500 draws should be sufficient for both point estimates and getting feel for uncertainty. So we end up with 500 different predictions for each point that was left out (one from each of the 500 draws). We will then have to summaries across draws from each point. We can gather information about point level uncertainty. We then can look at uncertainty to different levels 
 ```{r}
-predictions <- left_out_data %>% 
+predictions <- left_out_scaled %>% 
   add_predicted_draws(fit, ndraws = 500, allow_new_levels = T)
 
 #write_csv(predictions, "predictions_left_out.csv")
@@ -357,7 +430,7 @@ predictions_summary <- predictions %>%
             .prediction = median(.prediction))
 
 #connect these predictions back to the original data
-predictions_summary <- left_out_data %>% 
+predictions_summary <- left_out_scaled %>% 
   #this is needed due to maybe duplicate spec-length-hgppm-year-lake
   distinct(dow, spec, hgppm, lgthin, spec, .keep_all = T) %>% 
   left_join(predictions_summary, by = c("dow", "hgppm", "lgthin", "spec"))
@@ -373,7 +446,7 @@ predictions_summary_original <- predictions %>%
             .upper = quantile(.prediction, probs = c(0.975)),
             .prediction = median(.prediction))
 
-predictions_summary_original <- left_out_data %>% 
+predictions_summary_original <- left_out_scaled %>% 
   #this is needed due to there being some duplicate spec-length-hgppm-year-lake
   distinct(dow, spec, hgppm, lgthin, spec, .keep_all = T) %>% 
   left_join(predictions_summary_original, by = c("dow", "hgppm", "lgthin", "spec"))
@@ -386,7 +459,7 @@ Here we get a summary of:
 3. partial lakes with walleye or nop remaining
 ```{r}
 train_lakes <- unique(hg.data.loo$dow)
-left_out_data <- left_out_data %>% 
+left_out_scaled <- left_out_scaled %>% 
   mutate(lake_status = case_when(dow %in% train_lakes ~ "partial",
                                  TRUE ~ "new"))
 
@@ -394,17 +467,17 @@ train_species_by_lake <- hg.data.loo %>%
   group_by(dow) %>% 
   summarise(species_present = list(unique(spec)), .groups = "drop")
 
-left_out_data <- left_out_data %>% 
+left_out_scaled <- left_out_scaled %>% 
   left_join(train_species_by_lake, by = "dow") %>% 
   mutate(species_present = replace_na(species_present, list(character())))
 
-left_out_data <- left_out_data %>% 
+left_out_scaled <- left_out_scaled %>% 
   mutate(species_case = case_when(lake_status == "new" ~ "new_lake",
                                   map_lgl(species_present, ~ !("WAE" %in% .x | "NOP" %in% .x)) ~ "partial_no_wae_nop",
                                   TRUE ~ "partial_wae_or_nop"))
 
 
-left_out_data %>%
+left_out_scaled %>%
   distinct(dow, spec, .keep_all = T) %>% 
   group_by(species_case) %>% 
   count()
@@ -559,7 +632,7 @@ predictions_summary_original %>%
 # species leave out - metrics
 ```{r}
 #making grouping variable for lakes with complete leave out
-loo_lakes <- left_out_data %>% 
+loo_lakes <- left_out_scaled %>% 
   distinct(dow, lake_status, species_present, species_case) 
 
 # assign a y or n to lakes based on if it was completely left out or not
@@ -587,7 +660,7 @@ error_metrics <- predictions_summary_spec %>%
 error_metrics
 
 ############################################################################
-loo_lakes <- left_out_data %>% 
+loo_lakes <- left_out_scaled %>% 
   distinct(dow, lake_status, species_present, species_case) 
 
 # assign a y or n to lakes based on if it was completely left out or not
@@ -659,7 +732,7 @@ lake_species_preds <- predictions %>%
          -.point,
          -.interval)
 
-lake_species_obs <- left_out_data %>% 
+lake_species_obs <- left_out_scaled %>% 
   group_by(dow, spec) %>% 
   summarise(mean_obs = mean(log_hg))
 
@@ -684,7 +757,7 @@ lake_species_metrics
 
 #what about by various groupings?
 
-loo_lakes <- left_out_data %>% 
+loo_lakes <- left_out_scaled %>% 
   distinct(dow, spec, lake_status, species_present, species_case)
 
 lake_species_compare <- lake_species_compare %>% 
@@ -799,7 +872,7 @@ lake_species_preds <- predictions %>%
          -.point,
          -.interval)
 
-lake_species_obs <- left_out_data %>% 
+lake_species_obs <- left_out_scaled %>% 
   group_by(dow, spec) %>% 
   summarise(mean_obs = mean(hgppm))
 
@@ -824,7 +897,7 @@ lake_species_metrics
 
 #what about by various groupings?
 
-loo_lakes <- left_out_data %>% 
+loo_lakes <- left_out_scaled %>% 
   distinct(dow, spec, lake_status, species_present, species_case)
 
 lake_species_compare <- lake_species_compare %>% 
@@ -1168,25 +1241,6 @@ pred_data <- pred_data %>%
   janitor::clean_names()
 rm(dnr_covary, glm, lake_link, zm)
 ##############################################################################
-#now scale with original data
-#select variables that we need to scale
-scale_vars <- c("log_area",
-                "logit_wetlands",
-                "logit_urban",
-                "logit_ag",
-                "log_ws_lake_ratio")
-
-#grab scalers from original data
-scalers <- hg.model %>% 
-  select(all_of(scale_vars)) %>% 
-  summarise(across(everything(),
-                   list(mean = ~ mean(.x),
-                        sd = ~ sd(.x)))) 
-means <- scalers %>%  select(ends_with("_mean")) %>% as.list()
-sds <- scalers %>%  select(ends_with("_sd")) %>% as.list()
-names(means) <- gsub("_mean$", "", names(means))
-names(sds)   <- gsub("_sd$",   "", names(sds))
-
 #use scalers to put lakes in original data scale
 pred_data <- pred_data %>% 
   filter(ws_lake_ratio < 100) %>% 
@@ -1195,28 +1249,23 @@ pred_data <- pred_data %>%
   mutate(dow = as.factor(dow),
          dow = str_pad(dow, width = 8, pad = "0")) %>% 
   ungroup() %>%
-  mutate(across(all_of(scale_vars),
-                ~ (.x - means[[cur_column()]]) / sds[[cur_column()]],
-                .names = "scaled_{col}"))
-#check if there are differences between scaled values between lakes that exist in both
-check <- hg.model %>% 
-  distinct(dow, log_area, logit_wetlands, scaled_log_area, scaled_logit_wetlands) %>% 
-  left_join(pred_data, by = "dow", suffix = c("_new", "_old")) %>% 
-  select(dow, log_area_new, log_area_old, scaled_log_area_new, scaled_log_area_old, logit_wetlands_new, logit_wetlands_old, scaled_logit_wetlands_new, scaled_logit_wetlands_old) %>% 
-  mutate(diff_area = scaled_log_area_new - scaled_log_area_old,
-         diff_wetlands = scaled_logit_wetlands_new - scaled_logit_wetlands_old)
-rm(check, sds, means, scale_vars, scalers)
+  mutate(
+    # lake-level predictors
+    scaled_log_area =
+      (log_area - lake_scalers$mean_log_area) / lake_scalers$sd_log_area,
 
-################################################################################
+    scaled_logit_wetlands =
+      (logit_wetlands - lake_scalers$mean_logit_wetlands) / lake_scalers$sd_logit_wetlands,
 
-pred_data <- pred_data %>% 
-  select(dow,
-         zm_sample = zm_lake,
-         scaled_log_area,
-         scaled_logit_wetlands,
-         scaled_logit_urban,
-         scaled_logit_ag,
-         scaled_log_ws_lake_ratio)
+    scaled_logit_urban =
+      (logit_urban - lake_scalers$mean_logit_urban) / lake_scalers$sd_logit_urban,
+
+    scaled_logit_ag =
+      (logit_ag - lake_scalers$mean_logit_ag) / lake_scalers$sd_logit_ag,
+
+    scaled_log_ws_lake_ratio =
+      (log_ws_lake_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio
+  )
 
 pred_spec <- tibble(spec = c("WAE",
                              "NOP",
@@ -1231,20 +1280,14 @@ pred_spec <- tibble(spec = c("WAE",
                                12,
                                6.1,
                                12,
-                               8.1))
-length_scalers <- hg.model %>% 
-  group_by(spec) %>% 
-  summarise( length_mean = mean(lgthin),
-             length_sd   = sd(lgthin))
-
-pred_spec <- pred_spec %>% 
+                               8.1)) %>% 
   left_join(length_scalers,by = "spec") %>% 
   mutate(scaled_length = (length - length_mean)/length_sd)
 pred_spec
 
 #cross the datasets
 pred_full <- crossing(pred_data, pred_spec)
-rm(pred_data, pred_spec, length_scalers)
+rm(pred_data, pred_spec)
 
 #############################################################################
 #predicting at the lake-spec level 
@@ -1314,7 +1357,5 @@ ggplot() +
 - compare how our predicted risk compares to consumption guidelines
 
 #things to clean up:
--move scaled co variate calculations to after leave out 
     -rerun model
--save those parameters used in that calculation
 -compare these to where the DNR has consumption advisories 
