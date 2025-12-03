@@ -64,7 +64,7 @@ Final product:
 -further filtering and scaling is needed prior to modeling 
 ```{r}
 #mercury data
-hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   #remove any fish without length, mercury, or lake data
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%
   #only take data from lakes
@@ -101,14 +101,14 @@ hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 # Minnesota lakeshed data
-dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
          log_WS_Lake_Ratio = log(WS_Lake_Ratio))
 
 #glm for clarity and area
-glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -117,7 +117,7 @@ glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECT
   mutate(log_area = log(area))
 
 #infested waters list
-zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv")) %>% 
+zm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv")) %>% 
   filter(!is.na(DOW))  %>% 
   mutate(DOW = as.character(gsub("-", "", DOW))) %>% 
   select(DOW,
@@ -125,7 +125,7 @@ zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   mutate(zm_lag_year_infested = Year_Infested +2)
 
 #lake link
-lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
@@ -281,9 +281,11 @@ rm(loo_spec_lakes)
 # saved left out data
 Here is a short cut for reading in the leave out data from the drive. We also generate a dataframe of the data that has been left out of the modeling
 ```{r}
-hg.data.loo <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
+# write_csv(hg.data.loo, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv")) %>% 
+hg.data.loo <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
+
+hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv")) %>% 
   select(spec, yearcoll, dow, hgppm, lgthin)
 
 left_out_data <- hg.model %>% 
@@ -376,32 +378,36 @@ left_out_scaled <- left_out_data %>%
 
     scaled_log_ws_lake_ratio =
       (log_ws_lake_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio
-  )
+  ) %>% 
+  mutate(log_hg = log(hgppm))
 rm(left_out_data)
+
+hg.data.loo <- hg.data.loo %>% 
+  mutate(log_hg = log(hgppm))
 ```
 
 
 # random effects model
 ```{r}
-# fit <- brm(log_hg ~ 
-#                 scaled_length*spec + 
-#                 spec + 
-#                 scaled_logit_wetlands + 
-#                 scaled_logit_urban +
-#                 scaled_logit_ag + 
-#                 scaled_log_ws_lake_ratio + 
-#                 scaled_log_area + 
-#                 zm_sample +
-#                 (1|dow),
-#                      data = hg.data.loo,
-#                      iter = 10000,
-#                      warmup = 500,
-#                      chains = 3,
-#                      family = gaussian())
+ # fit <- brm(log_hg ~
+ #                 scaled_length*spec +
+ #                 spec +
+ #                 scaled_logit_wetlands +
+ #                 scaled_logit_urban +
+ #                 scaled_logit_ag +
+ #                 scaled_log_ws_lake_ratio +
+ #                 scaled_log_area +
+ #                 zm_sample +
+ #                 (1|dow),
+ #                      data = hg.data.loo,
+ #                      iter = 10000,
+ #                      warmup = 500,
+ #                     chains = 3,
+ #                      family = gaussian())
 
 #saveRDS(fit, "mn_random_leave_out.rds")
 
-fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mn_random_leave_out.rds"))
+fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mn_random_leave_out.rds"))
 
 summary(fit)
 ```
@@ -587,7 +593,7 @@ predictions_summary_original %>%
   theme(axis.text.x = element_blank()) +
   guides(color = guide_legend("Legend")) +
   theme(legend.position = "top")
-ggsave("loo_prediction_original_logged_for_display.png", dpi = 600, width = 11, height = 7, bg = "white")
+#ggsave("loo_prediction_original_logged_for_display.png", dpi = 600, width = 11, height = 7, bg = "white")
 
 predictions_summary_original %>%
   group_by(spec) %>% 
@@ -896,7 +902,6 @@ lake_species_metrics <- lake_species_compare %>%
 lake_species_metrics
 
 #what about by various groupings?
-
 loo_lakes <- left_out_scaled %>% 
   distinct(dow, spec, lake_status, species_present, species_case)
 
@@ -1091,7 +1096,7 @@ library(arrow)
 library(sf)
 library(maps)
 #first read in fisheries database to get coordinates
-coords <- open_dataset(file.path("G:", 
+coords <- open_dataset(file.path("D:", 
                                   "Shared drives", 
                                   "Hansen Lab", 
                                   "RESEARCH PROJECTS", 
@@ -1164,20 +1169,20 @@ rm(states, data_for_map, coords)
     -change zm_lake to zm_sample so that predictions are for when the lake was invaded
 ```{r}
 ########dataframe for lakes we would like to predict########################
-dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
          log_WS_Lake_Ratio = log(WS_Lake_Ratio))
 
-zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv")) %>% 
+zm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "ZM_MN_NHD.csv")) %>% 
   filter(!is.na(DOW))  %>% 
   mutate(DOW = as.character(gsub("-", "", DOW))) %>% 
   select(DOW,
          Year_Infested) %>% 
   mutate(zm_lag_year_infested = Year_Infested +2)
 
-glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -1186,7 +1191,7 @@ glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECT
   mutate(log_area = log(area))
 
 #lake link
-lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
@@ -1289,6 +1294,8 @@ pred_spec
 pred_full <- crossing(pred_data, pred_spec)
 rm(pred_data, pred_spec)
 
+pred_full <- pred_full %>% 
+  rename(zm_sample = zm_lake)
 #############################################################################
 #predicting at the lake-spec level 
 lake_spec_pred <- pred_full %>% 
@@ -1314,7 +1321,7 @@ lake_spec_org <- lake_spec_sum %>%
   mutate(nhdid = str_remove(nhdhr.id, "nhdhr_")) %>% 
   select(-nhdhr.id)
 
-lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
@@ -1337,25 +1344,90 @@ lake_spec_org %>%
 lake_sf <- lake_spec_org %>%
   ####FILTERING OUT FOR NOW BUT I THINK THERE IS CODE ABOVE TO FIX
   filter(!is.na(lake_lat_decdeg)) %>% 
-  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326)
+  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326) %>% 
+  mutate(species = case_when(spec == "BLC" ~ "Black Crappie",
+                             spec == "BLG" ~ "Bluegill",
+                             spec == "LMB" ~ "Largemouth Bass",
+                             spec == "NOP" ~ "Northern Pike",
+                             spec == "WAE" ~ "Walleye",
+                             spec == "YEP" ~ "Yellow Perch",
+                             spec == "WTS" ~ "White Sucker")) %>% 
+  mutate(risk = as.factor(risk),
+         risk = factor(risk, levels = c("high", "yellow flag", "worth a check", "low")))
 
 states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
   filter(ID %in% c("minnesota"))
 
 ggplot() +
   geom_sf(data = states, fill = "white", color = "black") +
-  geom_sf(data = lake_sf, 
-          aes(alpha = .prediction, shape = risk), 
-          color = "blue", size = 2) +
-  facet_wrap(~ spec) +
-  theme_minimal()
+  geom_sf(
+    data = lake_sf,
+    aes(
+      color = .prediction,
+      shape = risk
+    ),
+    size = 2
+  ) +
+  scale_shape_manual("Risk for Consumption", values = c(15, 16, 17, 18)) +
+  facet_wrap(~ species) +
+  scale_color_viridis_c(option = "plasma",
+                        name = "Mercury Concentration (ppm)") +
+  theme_minimal() +
+  theme(legend.box = "horizontal",
+    legend.position = c(.65, .15),
+    legend.key.size = unit(0.4, "lines"),
+    legend.title = element_text(size = 6),
+    legend.text  = element_text(size = 7),
+    legend.spacing.x = unit(0.2, "cm"),
+    legend.spacing.y = unit(0.2, "cm"))
+ggsave("prediction_map_all_lakes.jpg", height = 5, width = 5, dpi = 600)
+
+############################################################################
+lake_spec_org %>% 
+  group_by(spec, risk) %>% 
+  summarise(n_lakes = n()) %>% 
+  mutate(species = case_when(spec == "BLC" ~ "Black Crappie",
+                             spec == "BLG" ~ "Bluegill",
+                             spec == "LMB" ~ "Largemouth Bass",
+                             spec == "NOP" ~ "Northern Pike",
+                             spec == "WAE" ~ "Walleye",
+                             spec == "YEP" ~ "Yellow Perch",
+                             spec == "WTS" ~ "White Sucker")) %>% 
+  mutate(risk = as.factor(risk),
+         risk = factor(risk, levels = c("high", "yellow flag", "worth a check", "low"))) %>% 
+  ggplot() +
+  geom_col(aes(x = risk, y = n_lakes, fill = risk)) +
+  labs(y = NULL,
+       x = NULL) +
+  scale_fill_manual(values = c("red", "yellow", "lightgreen", "green")) +
+  facet_wrap(~species) +
+  theme_minimal() +
+  theme(legend.position = c(.65, .1),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave("predicted_risk_count.jpg", height = 5, width = 5, dpi = 600)
+
+lake_spec_org %>% 
+  group_by(spec, risk) %>% 
+  summarise(n_lakes = n()) %>% 
+  mutate(species = case_when(spec == "BLC" ~ "Black Crappie",
+                             spec == "BLG" ~ "Bluegill",
+                             spec == "LMB" ~ "Largemouth Bass",
+                             spec == "NOP" ~ "Northern Pike",
+                             spec == "WAE" ~ "Walleye",
+                             spec == "YEP" ~ "Yellow Perch",
+                             spec == "WTS" ~ "White Sucker")) %>% 
+  mutate(risk = as.factor(risk),
+         risk = factor(risk, levels = c("high", "yellow flag", "worth a check", "low"))) %>% 
+  ggplot() +
+  geom_col(aes(x = risk, y = n_lakes, fill = species)) +
+  labs(x = NULL,
+       y = NULL) +
+  theme_minimal() +
+  theme(legend.position = c(.1, .7))
+ggsave("risk_by_species.jpg", height = 5, width = 5, dpi = 600)
 ```
 
 # fun summaries and plots we can make:
 -risk by species (based on where the intervals and median sits)
 -clean up the map
 - compare how our predicted risk compares to consumption guidelines
-
-#things to clean up:
-    -rerun model
--compare these to where the DNR has consumption advisories 
