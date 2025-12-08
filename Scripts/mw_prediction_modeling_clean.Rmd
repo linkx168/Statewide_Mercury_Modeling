@@ -35,7 +35,7 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
+mw_hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
 ```
 
 # landcover exploration 
@@ -92,7 +92,6 @@ mw_hg %>%
 #ag, grass, pasture, shrub all are pretty low and not ecologically relevent 
 rm(vars_to_check)
 ```
-
 
 # data prep
 -select columns needed for modeling and filtering 
@@ -212,9 +211,9 @@ rm(loo_spec_lakes)
 ```{r}
 # write_csv(hg.data.loo.mw, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -375,7 +374,7 @@ fit <- brm(log_hgppm ~
                      chains = 3,
                       family = gaussian())
 
-saveRDS(fit, "mw_random_leave_out.rds")
+saveRDS(fit, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
 fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
