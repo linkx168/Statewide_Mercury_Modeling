@@ -1,0 +1,389 @@
+---
+title: "mw_prediction_modeling"
+author: "Denver Link"
+date: "2025-12-05"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# library
+```{r}
+library(tidyverse)
+library(arrow)
+library(LAGOSNE)
+library(ggrepel)
+library(mwlaxeref)
+library(mnsentinellakes)
+library(corrplot)
+library(performance)
+library(brms)
+library(lme4)
+library(Matrix)
+library(car)
+library(tidybayes)
+library(rstanarm)
+library(bayesplot)
+library(loo)
+library(arrow)
+library(sf)
+library(maps)
+library(viridis)
+library(tigris)
+library(emmeans)
+```
+
+# data
+```{r}
+mw_hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
+```
+
+# landcover exploration 
+```{r}
+#development?
+mw_hg %>% 
+  distinct(lagos_id, .keep_all = T) %>% 
+  mutate(pct_developed = nlcd_devopen21_pct +
+                nlcd_devlow22_pct +
+                nlcd_devmed23_pct +
+                nlcd_devhi24_pct) %>% 
+  filter(!is.na(pct_developed)) %>% 
+  summarise(n_10 = sum(pct_developed <=10),
+            n_0 = sum(pct_developed == 0), 
+            n = n())
+#almost 80% of lakes have under 10% development - lets not worry about it
+
+#keep forests seperate?
+forest_vars <- mw_hg %>%
+   distinct(lagos_id, .keep_all = T) %>% 
+   filter(!is.na(nlcd_devhi24_pct)) %>% 
+   select(nlcd_fordec41_pct, nlcd_forcon42_pct, nlcd_formix43_pct)
+cor(forest_vars)
+#they aren't strongly correlated so lets keep them different
+rm(forest_vars)
+
+
+vars_to_check <- c(
+  "nlcd_fordec41_pct",
+  "nlcd_forcon42_pct",
+  "nlcd_formix43_pct",
+  "nlcd_wetwood90_pct",
+  "nlcd_wetemerg95_pct",
+  "nlcd_cultcrop82_pct",
+  "nlcd_past81_pct",
+  "nlcd_grass71_pct",
+  "nlcd_shrub52_pct"
+)
+
+mw_hg %>% 
+  distinct(lagos_id, .keep_all = TRUE) %>% 
+  select(all_of(vars_to_check)) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  group_by(variable) %>%
+  summarise(
+    n_10 = sum(value <= 10),
+    n_5  = sum(value <= 5),
+    n_0  = sum(value == 0),
+    n    = n(),
+    .groups = "drop"
+  )
+#forest and wetlands have a good count for the wetlands and will keep
+#ag, grass, pasture, shrub all are pretty low and not ecologically relevent 
+rm(vars_to_check)
+```
+
+
+# data prep
+-select columns needed for modeling and filtering 
+-taking lagos ID because that is the level for which is the landcover data
+-keep forests separate to capture the diversity across our sampled lakes
+```{r}
+mw_hg_prep <- mw_hg %>% 
+  select(lagos_id,
+         lake_area_ha,
+         watershed_lake_area_ratio,
+         nlcd_fordec41_pct,
+         nlcd_forcon42_pct,
+         nlcd_formix43_pct,
+         nlcd_wetwood90_pct,
+         nlcd_wetemerg95_pct,
+         state,
+         year,
+         species,
+         sample_type,
+         num_fish_in_sample,
+         length_in,
+         hg_ppm) 
+```
+Sample types generally all look comparable and samples with more than one fish are smaller species that we should probably keep (at least for now)
+
+# filtering
+-most recent years (2000+)
+-take half of any sample 0.01 ppm (presumed LOD)
+-filter some really big ws lake ratios
+-filter for species of interest 
+-filter for lakes with landcover data
+```{r}
+mw_hg_prep <- mw_hg_prep %>% 
+  #year filter
+  filter(year > 1999) %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
+  mutate(hg_ppm = case_when(hg_ppm <= 0.01 ~ hg_ppm/2,
+                           TRUE ~ hg_ppm)) %>% 
+  #getting rid of some wonky ratios - worth coming back to
+  filter(watershed_lake_area_ratio < 100) %>% 
+  #species of interest (had enough sample size in MN)
+  filter(species %in% c("walleye",
+                      "northern_pike",
+                      "black_crappie",
+                      "bluegill",
+                      "white_sucker",
+                      "yellow_perch",
+                      "largemouth_bass")) %>% 
+  #only lakes with landcover data
+  filter(!is.na(nlcd_fordec41_pct)) %>% 
+  #no NA lengths or hg
+  filter(!is.na(length_in) & !is.na(hg_ppm))
+```
+
+# leave out data
+```{r}
+set.seed(10)
+
+#filtering out spec-lake combinations
+loo_spec_lakes <- mw_hg_prep %>% 
+  distinct(species, lagos_id) %>% 
+  sample_frac(0.15)
+
+hg.data.loo.mw <- mw_hg_prep %>% 
+  anti_join(loo_spec_lakes, by = c("species", "lagos_id"))
+
+#summary of samples that were left out
+mw_hg_prep %>% 
+  semi_join(loo_spec_lakes, by = c("species", "lagos_id")) %>% 
+  summarise(avg_hg = mean(hg_ppm),
+            wae = sum(species == "walleye"),
+            nop = sum(species == "northern_pike"),
+            spec_else = sum(species != "walleye" & species != "northern_pike"),
+            n = n())
+
+mw_hg_prep %>% 
+  semi_join(loo_spec_lakes, by = c("species", "lagos_id")) %>% 
+  distinct(lagos_id, .keep_all = T) %>% 
+  summarise(avg_size = mean(lake_area_ha),
+            avg_wetland = mean(nlcd_wetemerg95_pct),
+            avg_wetwood = mean(nlcd_wetwood90_pct),
+            avg_for_dec = mean(nlcd_fordec41_pct),
+            avg_for_con = mean(nlcd_forcon42_pct),
+            avg_for_mix = mean(nlcd_formix43_pct),
+            n_lakes = n_distinct(lagos_id))
+
+#are there any lakes totally removed?
+#if multiple species were removed making removed completely, the lake will show up n times
+mw_hg_prep %>% 
+  distinct(lagos_id, species) %>% 
+  anti_join(hg.data.loo.mw, by = "lagos_id") %>% 
+  arrange(lagos_id) %>% 
+  print(n = nrow(.))
+
+mw_hg_prep %>% 
+  distinct(lagos_id, species) %>% 
+  anti_join(hg.data.loo.mw, by = "lagos_id") %>% 
+  arrange(lagos_id) %>%
+  distinct(lagos_id) %>% 
+  print(n = nrow(.))
+
+#how many times was a species removed but at least one still remained?
+mw_hg_prep %>%
+  distinct(lagos_id, species) %>%
+  anti_join(hg.data.loo.mw, by = c("species", "lagos_id")) %>% 
+  semi_join(hg.data.loo.mw, by = "lagos_id") 
+
+#write_csv(hg.data.loo.mw, "hg_model_data_loo_mw.csv")
+rm(loo_spec_lakes)
+```
+
+# saved leave out data
+
+-read in saved fish data with some left out
+-anti join to who fish data set that has been prepped
+-this generates a dataset of the fish left out of the model fit
+```{r}
+# write_csv(hg.data.loo.mw, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
+
+hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+
+hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+  select(species, year, lagos_id, hg_ppm, length_in)
+
+left_out_data <- mw_hg_prep %>% 
+  anti_join(hg.data.loo_anti)
+
+rm(hg.data.loo_anti)
+```
+
+# transforming, scaling, and formating variables for modeling 
+-scale and make sure scalers are saved for prediction 
+-scale length by species
+-scale lake-level covarites
+   (make sure that we scale for each unique lake, not at the fish level)
+-filtering out any fish that are +/- 3 SD 
+```{r}
+#transform variables
+hg.data.loo.mw <- hg.data.loo.mw %>% 
+  #first, lets provide 0's in our landcover data with a very small number so they can be transfomred to logit scale
+  mutate(across(starts_with("nlcd"),
+                ~ifelse(.x ==0, 0.001, .x))) %>%
+  #now apply logit transformations to landcover and log to others
+  mutate(logit_wetwood = car::logit(nlcd_wetwood90_pct),
+         logit_wetemerge = car::logit(nlcd_wetemerg95_pct),
+         logit_formix = car::logit(nlcd_formix43_pct),
+         logit_forcon = car::logit(nlcd_forcon42_pct),
+         logit_fordec = car::logit(nlcd_fordec41_pct),
+         log_area = log(lake_area_ha),
+         log_ws_area_ratio = log(watershed_lake_area_ratio),
+         log_hgppm = log(hg_ppm))
+
+#scale lake level data (have to get to one lake per row and then apply to fish data)
+lake_level <- hg.data.loo.mw %>% 
+  distinct(lagos_id, 
+           logit_wetwood,
+           logit_wetemerge, 
+           logit_formix, 
+           logit_forcon,
+           logit_fordec,
+           log_area,
+           log_ws_area_ratio)
+
+lake_scalers <- lake_level %>% 
+  summarise(
+    mean_log_area = mean(log_area),
+    sd_log_area   = sd(log_area),
+
+    mean_logit_wetwood = mean(logit_wetwood),
+    sd_logit_wetwood  = sd(logit_wetwood),
+    
+    mean_logit_wetemerge = mean(logit_wetemerge),
+    sd_logit_wetemerge  = sd(logit_wetemerge),
+
+    mean_logit_formix = mean(logit_formix),
+    sd_logit_formix   = sd(logit_formix),
+    
+    mean_logit_forcon = mean(logit_forcon),
+    sd_logit_forcon   = sd(logit_forcon),
+    
+    mean_logit_fordec = mean(logit_fordec),
+    sd_logit_fordec   = sd(logit_fordec),
+
+    mean_lw_ratio = mean(log_ws_area_ratio),
+    sd_lw_ratio   = sd(log_ws_area_ratio),
+  )
+
+#length scalers
+length_scalers <- hg.data.loo.mw %>% 
+  group_by(species) %>% 
+  summarise(
+    length_mean = mean(length_in),
+    length_sd   = sd(length_in)
+  )
+
+######################apply scaling#################################
+#lake level
+hg.data.loo.mw <- hg.data.loo.mw %>%
+    mutate(scaled_log_area = (log_area - lake_scalers$mean_log_area) /lake_scalers$sd_log_area,
+           
+           scaled_logit_wetwood = (logit_wetwood - lake_scalers$mean_logit_wetwood) / lake_scalers$sd_logit_wetwood,
+           
+           scaled_logit_wetemerge = (logit_wetemerge - lake_scalers$mean_logit_wetemerge) / lake_scalers$sd_logit_wetemerge,
+           
+           scaled_logit_formix = (logit_formix - lake_scalers$mean_logit_formix) / lake_scalers$sd_logit_formix,
+           
+           scaled_logit_forcon = (logit_forcon - lake_scalers$mean_logit_forcon) / lake_scalers$sd_logit_forcon,
+           
+           scaled_logit_fordec = (logit_fordec - lake_scalers$mean_logit_fordec) / lake_scalers$sd_logit_fordec,
+           
+           scaled_log_ws_area_ratio = (log_ws_area_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio) 
+
+#length scaler
+hg.data.loo.mw <- hg.data.loo.mw %>% 
+  left_join(length_scalers, by = "species") %>% 
+  mutate(scaled_length = (length_in - length_mean)/ length_sd) %>% 
+  select(-length_mean,
+         -length_sd)
+rm(lake_level)
+
+#now prep left out data to match the scaling used in prediction 
+left_out_scaled <- left_out_data %>%
+  mutate(across(starts_with("nlcd"),
+                ~ifelse(.x ==0, 0.001, .x))) %>%
+  mutate(logit_wetwood = car::logit(nlcd_wetwood90_pct),
+         logit_wetemerge = car::logit(nlcd_wetemerg95_pct),
+         logit_formix = car::logit(nlcd_formix43_pct),
+         logit_forcon = car::logit(nlcd_forcon42_pct),
+         logit_fordec = car::logit(nlcd_fordec41_pct),
+         log_area = log(lake_area_ha),
+         log_ws_area_ratio = log(watershed_lake_area_ratio),
+         log_hgppm = log(hg_ppm)) %>% 
+  left_join(length_scalers, by = "species") %>% 
+  mutate(
+    
+    # fish-level scaling 
+    scaled_length = (length_in - length_mean) / length_sd,
+
+    # lake-level predictors
+           scaled_log_area = (log_area - lake_scalers$mean_log_area) /lake_scalers$sd_log_area,
+           
+           scaled_logit_wetwood = (logit_wetwood - lake_scalers$mean_logit_wetwood) / lake_scalers$sd_logit_wetwood,
+           
+           scaled_logit_wetemerge = (logit_wetemerge - lake_scalers$mean_logit_wetemerge) / lake_scalers$sd_logit_wetemerge,
+           
+           scaled_logit_formix = (logit_formix - lake_scalers$mean_logit_formix) / lake_scalers$sd_logit_formix,
+           
+           scaled_logit_forcon = (logit_forcon - lake_scalers$mean_logit_forcon) / lake_scalers$sd_logit_forcon,
+           
+           scaled_logit_fordec = (logit_fordec - lake_scalers$mean_logit_fordec) / lake_scalers$sd_logit_fordec,
+           
+           scaled_log_ws_area_ratio = (log_ws_area_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio
+  ) %>% 
+  mutate(log_hg = log(hg_ppm))
+rm(left_out_data)
+
+hg.data.loo.mw <- hg.data.loo.mw %>% 
+  mutate(lagos_id = as.character(lagos_id))
+
+left_out_scaled <- left_out_scaled %>% 
+  mutate(lagos_id = as.character(lagos_id))
+```
+
+# fit model
+```{r}
+fit <- brm(log_hgppm ~
+                 scaled_length*species +
+                 species +
+                 scaled_logit_wetwood +
+             scaled_logit_wetemerge +
+                 scaled_logit_formix +
+             scaled_logit_forcon +
+             scaled_logit_fordec +
+                 scaled_log_ws_area_ratio +
+                 scaled_log_area +
+                 (1|lagos_id),
+                      data = hg.data.loo.mw,
+                      iter = 10000,
+                      warmup = 500,
+                     chains = 3,
+                      family = gaussian())
+
+saveRDS(fit, "mw_random_leave_out.rds")
+
+fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+
+summary(fit)
+```
+
+# predictions 
+```{r}
+
+```
+

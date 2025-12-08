@@ -30,7 +30,7 @@ mn_zm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJE
 ```
 
 # Ag
-This aggregation assumes all glifwc samples in MN were duplicates in the state data - I only take the Wisconsin samples from GLIFWC. 
+This aggregation assumes all glifwc samples in MN and WI were duplicates in the state data
 ```{r}
 #get glifwc and mn data together
 glifwc_merge <- glifwc %>% 
@@ -151,8 +151,6 @@ wi_hg_merge <- wi_hg %>%
 hg_data <- bind_rows(wi_hg_merge, hg_data) 
 rm(wi_hg, wi_hg_merge)
 rm(mglp)
-
-##########STOPPED RIGHT HERE, I have to figure out this join################
 
 
 # read in covariate data from lagos
