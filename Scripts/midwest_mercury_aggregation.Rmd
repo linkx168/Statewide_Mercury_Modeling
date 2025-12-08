@@ -1,0 +1,752 @@
+---
+title: "midwest_mercury_aggregation"
+author: "Denver Link"
+date: "2025-10-24"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Library
+```{r}
+library(tidyverse)
+library(mwlaxeref)
+library(mnsentinellakes)
+```
+
+# Data
+```{r}
+#mercury
+mn_dnr <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv"))
+
+glifwc <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg.csv"))
+
+wi_hg <- read_csv(file.path("G:", 
+                             "Shared drives", 
+                             "Hansen Lab", 
+                             "RESEARCH PROJECTS", 
+                             "Statewide mercury modeling", 
+                             "Data", 
+                             "Mercury Data", 
+                             "WI",
+                             "wi_hg_26NOV2024.csv"))
+```
+
+# standardize glifwc data
+```{r}
+glifwc_merge <- glifwc %>% 
+  #for the sake of ease I'm going to assume all mn and WI samples are duplicates and throw them out
+  filter(!(state %in% c("MN", "WI")))
+```
+
+# standardize mn data
+```{r}
+mn_dnr_merge <- mn_dnr %>% 
+  #removes samples with no hg, length, or dow data
+  filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   
+  #only taking lake samples
+  filter(TYPE %in% c("Lake", "LAKE")) %>% 
+  #fixing dowid
+  mutate(DOWID = fixlakeid(DOWID)) %>% 
+  #removing great lake
+  filter(DOWID != "16000100") %>% 
+  #generating nhdid
+  local_to_nhdhr(from_colname = "DOWID", states = "mn") %>% 
+  #adding prefix to nhdid
+  mutate(nhdhr.id = paste0("nhdhr_", nhdhr.id)) %>%
+  #adding lagos
+  local_to_lagos(from_colname = "DOWID", states = "mn") %>% 
+  #selecting columns for rowbind
+  rename(waterbody = WATERWAY,
+         year = YEARCOLL,
+         spp_code = SPEC,
+         length_in = LGTHIN,
+         wt_lbs = WTLB,
+         age = AGE,
+         hg_ppm = HGPPM,
+         state_id = DOWID,
+         sample_type = ANATHG,
+         num_fish_in_sample = NOFISH,
+         sex = SEX,
+         hg_code = HGCODE,
+         hg_lab = HGLAB,
+         hg_notes = HGCMMT,
+         lagoslakeid = lagos.id) %>% 
+  mutate(state = "MN",
+         county = NA,
+         sample_date = mdy(DATECOL2)) %>% 
+  select(state,
+         county,
+         waterbody,
+         state_id,
+         lagoslakeid,
+         nhdhr.id,
+         lagoslakeid,
+         sample_date,
+         year,
+         spp_code,
+         sample_type,
+         num_fish_in_sample,
+         length_in,
+         wt_lbs,
+         age,
+         sex,
+         hg_ppm,
+         hg_code,
+         hg_lab,
+         hg_notes)
+```
+
+# standarize wi data
+```{r}
+wi_hg_merge <- wi_hg %>% 
+  mutate(state = "WI", 
+         waterbody = primary_site,
+         state_id = gsub("_", "",wbic),
+         state_id = case_when(state_id == "" ~ NA,
+                              TRUE ~ state_id),
+         state_id = as.numeric(state_id),
+         year = year(sample_date),
+         spp_code = sample_type,
+         sample_type = sample_form,
+         num_fish_in_sample = number_of_fish,
+         length_in = avg_length_in,
+         wt_lbs = avg_body_wt_kg*2.2,
+         sex = gender,
+         hg_ppm = mercury_ug_g,
+         hg_code = NA,
+         hg_lab = NA,
+         hg_notes = comments) %>% 
+  local_to_lagos(from_colname = "state_id", states = "wi") %>%
+  local_to_nhdhr(from_colname = "state_id", states = "wi") %>%
+  mutate(nhdhr.id = paste0("nhdhr_", nhdhr.id)) %>%
+  rename(lagoslakeid = lagos.id) %>% 
+  select(state,
+         county,
+         waterbody,
+         state_id,
+         lagoslakeid,
+         nhdhr.id,
+         sample_date,
+         year,
+         spp_code,
+         sample_type,
+         num_fish_in_sample,
+         length_in,
+         wt_lbs,
+         age,
+         sex,
+         hg_ppm,
+         hg_code,
+         hg_lab,
+         hg_notes)
+
+#now lets drop any non-lakes
+wi_hydro_list <- read_csv("G:/Shared drives/Hansen Lab/RESEARCH PROJECTS/Fish Survey Data/WI_Data/WI_Rivers_Info/24k_Hydro_Waterbodies_(Open_Water).csv")
+
+wi_hydro_list <- wi_hydro_list %>% 
+  select(state_id = WATERBODY_WBIC,
+         hydrotype = HYDROTYPE) %>% 
+  mutate(state_id = as.character(state_id)) %>% 
+  distinct(state_id, .keep_all = T)
+
+wi_hg_merge <- wi_hg_merge %>% 
+  left_join(wi_hydro_list)
+
+# HYDROTYPE info from https://widnr.widen.net/s/f8sldtk6qf/hydro_waterbody_data_dict
+
+wi_hg_merge <- wi_hg_merge %>%
+  mutate(waterbody_type = case_when(hydrotype == 601 ~ "Ditch/canal", 
+                                   hydrotype == 602 ~ "Stream/river",
+                                   hydrotype == 610 ~ "Cranberry bog",
+                                   hydrotype == 701 ~ "Backwater",
+                                   hydrotype == 702 ~ "Fish Hatchery",
+                                   hydrotype == 703 ~ "Flooded Excavation",
+                                   hydrotype == 704 ~ "Innundation Area",
+                                   hydrotype == 705 ~ "Industrial Waste Pond",
+                                   hydrotype == 706 ~ "Lake/Pond",
+                                   hydrotype == 707 ~ "Reservoir/Flowage",
+                                   hydrotype == 708 ~ "Sewage Disposal Pond",
+                                   hydrotype == 709 ~ "Tailings Pond",
+                                   hydrotype == 710 ~ "Unspecified Open Water",
+                                   TRUE ~ NA)) 
+wi_hg_merge %>% 
+  group_by(waterbody_type) %>% 
+  count()
+
+wi_hg_merge %>% 
+  filter(is.na(waterbody_type)) %>% 
+  group_by(waterbody) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+#drop weird waters
+wi_hg_merge <- wi_hg_merge %>% 
+  filter(waterbody_type %in% c("Lake/Pond", "Backwater", "Reservoir/Flowage", "Unspecified Open Water")) %>% 
+  filter(!is.na(waterbody_type)) %>% 
+  select(-waterbody_type,
+         -hydrotype)
+rm(wi_hydro_list)
+```
+
+# combine hg data
+```{r}
+#glifwc and mn 
+hg_data <- bind_rows(glifwc_merge, mn_dnr_merge, wi_hg_merge)
+rm(glifwc,
+   glifwc_merge,
+   mn_dnr,
+   mn_dnr_merge,
+   wi_hg,
+   wi_hg_merge)
+```
+
+# lagos data aggregation
+-this chunk uses the lagos data from the drive in prep to connect to hg data
+```{r}
+#crosswalk for lagos id to nhdhr
+xwalk <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_link.csv"))
+glimpse(xwalk)
+
+#land use land cover data
+lagos_watershed_lulc <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lagos_watershed_lulc.csv"))
+glimpse(lagos_watershed_lulc)
+
+#watershed attributes data
+lagos_watershed <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_watersheds.csv"))
+glimpse(lagos_watershed)
+
+##############################################################################
+#combine watershed data
+lagos_watershed_lulc %>% 
+  group_by(year) %>% 
+  summarise(n = n(),
+            n_lakes = n_distinct(zoneid))
+
+#take only the most recent year and remove some unnessary variables 
+most_recent_landcover <- lagos_watershed_lulc %>% 
+  filter(year == 2016) %>% 
+  select(-spatial_division,
+         -year,
+         -datacoveragepct,
+         -precision) %>% 
+  rename(lagoslakeid = zoneid)
+rm(lagos_watershed_lulc)
+
+lagos_watershed %>% 
+  select(lagoslakeid,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         ws_states)
+##########################################################################
+#there are more lakes with lagos information than there are lakes with landcover data
+#quick look at where there is not landcover data but there is some watershed information 
+bad <- lagos_watershed %>% 
+  anti_join(most_recent_landcover) %>% 
+  distinct(lagoslakeid)
+
+library(maps)
+
+us <- map_data("state")
+
+#visualizes where there a lake does not connect to lake_link with a lagos id
+xwalk %>% 
+  filter(lagoslakeid %in% bad$lagoslakeid) %>% 
+  ggplot() +
+  geom_polygon(data = us, aes(x = long, y = lat, group = group),
+               fill = "white", color = "black") +
+  geom_point(aes(x = lake_lon_decdeg, y = lake_lat_decdeg),
+             color = "red", size = 2, alpha = 0.7) +
+  coord_quickmap(xlim = c(-125, -66), ylim = c(25, 50)) +
+  theme_minimal()
+rm(us, bad)
+#looks like we will have some trouble with border waters in MN
+
+bad_mn <- lagos_watershed %>% 
+  filter(ws_states == "MN") %>% 
+  anti_join(most_recent_landcover) %>% 
+  distinct(lagoslakeid)
+
+bad_mn <- xwalk %>% 
+  filter(lagoslakeid %in% bad_mn$lagoslakeid)
+rm(bad_mn)
+###############################################################################
+#lets just filter for the states we care about to save some memory
+covary <- lagos_watershed %>% 
+  left_join(most_recent_landcover) %>% 
+  mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
+                                str_detect(ws_states, "WI") ~ "y",
+                                str_detect(ws_states, "MI") ~ "y",
+                                TRUE ~ "n")) %>% 
+  filter(state_keep == "y")
+rm(lagos_watershed,
+   most_recent_landcover)
+
+#quick look again at where we don't have landcover data
+covary %>% 
+  filter(is.na(nlcd_devopen21_pct)) %>% 
+  group_by(ws_states) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
+covary %>% 
+  filter(is.na(nlcd_devopen21_pct)) %>% 
+  distinct(lagoslakeid, ws_states) %>% 
+  left_join(xwalk) %>% 
+  group_by(lake_namelagos, ws_states) %>% 
+  count()
+#############################################################################
+#lets just grab the lagos id, nhdhr, name, and coords for cross walking
+xwalk <- xwalk %>% 
+  distinct(lagoslakeid,
+         lake_nhdid,
+         lake_namegnis,
+         lake_namelagos,
+         lake_lat_decdeg,
+         lake_lon_decdeg)
+
+#grabbing cross walk information via lagos id (really interested in the nhdhr)
+covary <- covary %>% 
+  left_join(xwalk, relationship = "one-to-one")
+rm(xwalk)
+#now we have covary data with an nhdhr 
+#############################################################################
+#final_product
+
+#first select the covary data that we care about for hg modeling
+covary <- covary %>% 
+  select(ws_states,
+         lagoslakeid,
+         lake_namegnis,
+         lake_namelagos,
+         ws_lat_decdeg,
+         ws_lon_decdeg,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         contains("nlcd"))
+
+###now we have some clean up
+#state
+covary %>% 
+  group_by(ws_states) %>% 
+  count()
+
+#clean up state names
+covary <- covary %>% 
+  mutate(state = case_when(str_detect(ws_states, "MN") ~ "Minnesota",
+                           str_detect(ws_states, "WI") ~ "Wisconsin",
+                           str_detect(ws_states, "MI") ~ "Michigan",
+                           TRUE ~ NA)) %>% 
+  select(-ws_states) %>% 
+  relocate(state, .before = lagoslakeid)
+
+#clean up lake names so that we only have one column
+covary <- covary %>% 
+  mutate(lake_name = case_when(is.na(lake_namegnis) ~ lake_namelagos,
+                               is.na(lake_namelagos) ~ lake_namegnis,
+                               TRUE ~ lake_namelagos)) %>% 
+  select(-lake_namegnis,
+         -lake_namelagos) %>% 
+  relocate(lake_name, .after = lagoslakeid)
+########### here is a step we save the covarite data we aggregated#############
+
+#write_csv(covary, "lagos_covarites_all_lakes_mn_wi_mi_23oct2025.csv")
+```
+
+# combine hg and lagos data
+```{r}
+#read in saved covarite data that we created above (or you can just run the code)
+covary <- read_csv(file.path("G:", 
+                             "Shared drives", 
+                             "Hansen Lab", 
+                             "RESEARCH PROJECTS", 
+                             "Statewide mercury modeling", 
+                             "Data", 
+                             "Covariate Data", 
+                             "lagos_covarites_all_lakes_mn_wi_mi_23oct2025.csv"))
+
+glimpse(hg_data)
+glimpse(covary)
+
+# join covary data based on lagos id
+hg_data <- hg_data %>% 
+  mutate(lagoslakeid = as.numeric(lagoslakeid)) %>% 
+  left_join(covary, by = "lagoslakeid", suffix = c("_hg", "_lagos"))
+
+############################################################################
+#clean it up a little bit
+hg_data <- hg_data %>% 
+  #when state is NA fill with the other column
+  mutate(state = case_when(is.na(state_hg) ~ state_lagos,
+                           is.na(state_lagos) ~ state_hg,
+                           TRUE ~ state_lagos)) %>% 
+  #clean state names
+  mutate(state = case_when(state == "MN" ~ "Minnesota",
+                           state == "WI" ~ "Wisconsin",
+                           state == "MI"  ~ "Michigan",
+                           TRUE ~ state))  %>% 
+  select(-state_hg,
+         -state_lagos) %>% 
+  relocate(state, .before = year)
+
+#places were we don't get any landcover data
+#this could be because 1.) there is a bad lagos link to the covary daata OR lagos did not have landcover data
+bad_lagos_links <- hg_data %>% 
+  filter(is.na(nlcd_openwater11_pct)) %>% 
+  distinct(state, state_id, lagoslakeid, lake_name, waterbody, ws_lat_decdeg, ws_lon_decdeg) 
+#in this data frame, places that have a lat/lon (or lagos id) were connected to lagos data but the lagos data does not have landcover data
+#places where lat/lon is NA are mercury records that are not linked to lagos data
+
+###############################################################################
+#there were some obvious MN errors (a DOW increased sequentially like it was a pulled down in Excel)
+#I will fix these by just assigning those records back to the parent dow (00)
+#recoping some MN records
+fixed_dows <- bad_lagos_links %>% 
+  filter(state == "Minnesota") %>% 
+  filter(!grepl("00$", state_id)) %>% 
+  mutate(state_id_new = sub("\\d{2}$", "00", state_id)) %>% 
+  distinct(state_id, state_id_new) %>% 
+  local_to_lagos(from_colname = "state_id_new",states = "mn") %>% 
+  #looks like there is still one case of an NA (upper twin super small)
+  filter(!is.na(lagos.id)) %>%
+  mutate(lagoslakeid = as.numeric(lagos.id)) %>% 
+  select(-lagos.id) %>% 
+  left_join(covary, by = c("lagoslakeid"))
+#now we have a cross walk to bad lake ids with fixed ids and covariate data
+
+#original data from these records
+bad_org <- hg_data %>% 
+  filter((state_id %in% fixed_dows$state_id)) %>%
+  select(year,
+         county,
+         waterbody,
+         sample_date,
+         spp_code,
+         length_in,
+         wt_lbs,
+         age,
+         hg_ppm,
+         state_id,
+         nhdhr.id,
+         sample_type,
+         num_fish_in_sample,
+         sex,
+         hg_code,
+         hg_lab,
+         hg_notes) %>% 
+  left_join(fixed_dows, by = c("state_id")) %>% 
+  mutate(state_id = state_id_new) %>% 
+  select(-state_id_new)
+  
+#now lets filter out these records for the original data
+hg_data <- hg_data %>% 
+  filter(!(state_id %in% fixed_dows$state_id))
+
+#add them fixed records back in
+hg_data <- bind_rows(bad_org, hg_data)
+
+rm(bad_org, fixed_dows, covary)
+#######################################################
+bad_lagos_links <- hg_data %>% 
+  filter(is.na(nlcd_openwater11_pct)) %>% 
+  distinct(state, state_id, lagoslakeid, lake_name, waterbody, ws_lat_decdeg, ws_lon_decdeg)
+rm(bad_lagos_links)
+```
+Notes on bad lagos links:
+1. all mn lakes that have a lagos id but not covary data are border waters
+2. I fixed some Minnesota samples that were not picking up lagos id due to sub basin id errors (several reasons for this, including erroneous ids)
+- for example Ida appears to have 20+ DOWS (but that must be a drag error in excel)
+- there appears to still be some id errors in the data (ex one record in data 11305000 says gull, but the real gull lake is 11030500)
+3. looks like almost all of the wisconsin misses are Rivers or creeks - tired to look a few up on the web page and couldn't locate them
+4. all michigan are misses because we don't currently have a state level id from glifwc
+
+**Try nhdhr cross walk to see if that works for some missing lakes**
+
+# clean up the final data 
+```{r}
+#lets start by ordering columns better: starting at highest lake-level and working down to fish
+hg_data_trial <- hg_data %>% 
+  select(state,
+         county,
+         waterbody,
+         lake_name_lagos = lake_name,
+         state_id,
+         lagoslakeid,
+         nhdhr.id,
+         ws_lat_decdeg,
+         ws_lon_decdeg,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         nlcd_openwater11_pct,
+         nlcd_icesnow12_pct,
+         nlcd_devopen21_pct,
+         nlcd_devlow22_pct,
+         nlcd_devmed23_pct,
+         nlcd_devhi24_pct,
+         nlcd_barren31_pct,
+         nlcd_fordec41_pct,
+         nlcd_forcon42_pct,
+         nlcd_formix43_pct,
+         nlcd_shrub52_pct,
+         nlcd_grass71_pct,
+         nlcd_past81_pct,
+         nlcd_cultcrop82_pct,
+         nlcd_wetwood90_pct,
+         nlcd_wetemerg95_pct,
+         year,
+         sample_date,
+         spp_code,
+         sample_type,
+         num_fish_in_sample,
+         length_in,
+         wt_lbs,
+         age,
+         sex,
+         hg_ppm,
+         hg_code,
+         hg_lab,
+         hg_notes) 
+
+#############################################################################
+#fill lagos lake name with agency specified name when lagos is missing
+hg_data_trial <- hg_data_trial %>% 
+  mutate(lake_name = case_when(is.na(lake_name_lagos) ~ waterbody,
+                               TRUE ~ lake_name_lagos)) %>% 
+  select(-waterbody,
+         -lake_name_lagos) %>% 
+  relocate(lake_name, .after = county)
+
+#rename lagos column
+hg_data_trial <- hg_data_trial %>% 
+  rename(lagos_id = lagoslakeid)
+
+#fixes nhdhr for MN lakes that had bad state id before 
+#make NA nhdhr actually NA
+hg_data_trial <- hg_data_trial %>% 
+  lagos_to_nhdhr(from_colname = "lagos_id") %>% 
+  mutate(nhdhr_id = case_when(nhdhr.id.x == "nhdhr_NA" | is.na(nhdhr.id.x) ~ paste0("nhdhr_", nhdhr.id.y),
+                              TRUE ~ nhdhr.id.x),
+         nhdhr_id = case_when(nhdhr_id == "nhdhr_NA" ~ NA,
+                              TRUE ~ nhdhr_id)) %>% 
+  select(-nhdhr.id.x, -nhdhr.id.y) %>% 
+  relocate(nhdhr_id, .after = lagos_id)
+
+#fix name of lat and lon
+hg_data_trial <- hg_data_trial %>% 
+  rename(lat_decdeg = ws_lat_decdeg,
+         lon_decdeg = ws_lon_decdeg)
+
+#fix name of areas
+hg_data_trial <- hg_data_trial %>% 
+  rename(lake_area_ha = ws_focallakewaterarea_ha,
+         watershed_area_ha = ws_area_ha,
+         watershed_lake_area_ratio = ws_lake_arearatio)
+
+#check if years and dates look consistent and reliable 
+hg_data_trial %>% 
+  group_by(state) %>% 
+  summarise(min_year = min(year),
+            max_year = max(year),
+            min_date = min(sample_date, na.rm = T),
+            max_date = max(sample_date, na.rm = T))
+
+# fix species
+hg_data_trial %>% 
+  group_by(spp_code, state) %>% 
+  count() %>% 
+  arrange(state) %>% 
+  print(n = nrow(.))
+
+#first lets fix fish codes - stealing code from fish ag project MN codes (may be some cross over with other states)
+hg_data_trial <- hg_data_trial %>% 
+  mutate(species = case_when(# first fish codes are converted,
+                            spp_code == "LMB" ~ "largemouth_bass",
+                            spp_code == "SMB" ~ "smallmouth_bass",
+                            spp_code == "WAE" ~ "walleye", 
+                            spp_code == "WTS" ~ "white_sucker",
+                            spp_code == "BLC" ~ "black_crappie",
+                            spp_code == "YEP" ~ "yellow_perch",
+                            spp_code == "BLG" ~ "bluegill",
+                            spp_code == "NOP" ~ "northern_pike",
+                            spp_code == "PMK" ~ "pumpkinseed", 
+                            spp_code == "RKB" ~ "rock_bass",
+                            spp_code == "BKF" ~ "banded_killifish",
+                            spp_code == "IOD" ~ "iowa_darter",
+                            spp_code == "BCS" ~ "blackchin_shiner",
+                            spp_code == "BLB" ~ "black_bullhead",
+                            spp_code == "JND" ~ "johnny_darter",
+                            spp_code == "GOS" ~ "golden_shiner",
+                            spp_code == "YEB" ~ "yellow_bullhead",
+                            spp_code == "BRB" ~ "brown_bullhead",
+                            spp_code == "CNM" ~ "central_mudminnow",
+                            spp_code == "NRD" ~ "northern_redbelly_dace",
+                            spp_code == "CSH" ~ "chinook_salmon",
+                            spp_code == "MTS" ~ "mottled_sculpin",
+                            spp_code == "TPM" ~ "tadpole_madtom",
+                            spp_code == "SHR" ~ "shorthead_redhorse",
+                            spp_code == "HSF" ~ "hybrid_sunfish",
+                            spp_code == "BOF" ~ "bowfin",
+                            spp_code == "WDS" ~ "weed_shiner",
+                            spp_code == "BNM" ~ "bluntnose_minnow",
+                            spp_code == "BND" ~ "blacknose_dace",
+                            spp_code == "OTM" ~ "minnows",
+                            spp_code == "FHM" ~ "fathead_minnow",
+                            spp_code == "FND" ~ "finescale_dace",
+                            spp_code == "SDM" ~ "slender_madtom",
+                            spp_code == "SPO" ~ "spottail_shiner",
+                            spp_code == "BNS" ~ "blacknose_shiner",
+                            spp_code == "BKT" ~ "brook_trout",
+                            spp_code == "SPT" ~ "splake",
+                            spp_code == "RBT" ~ "rainbow_trout",
+                            spp_code == "BNT" ~ "brown_trout",
+                            spp_code == "BUB" ~ "burbot",
+                            spp_code == "BIB" ~ "bigmouth_buffalo",
+                            spp_code == "BLH" ~ "bullheads",
+                            spp_code == "TLC" ~ "cisco",
+                            spp_code == "CCF" ~ "channel_catfish",
+                            spp_code == "BSD" ~ "blackside_darter",
+                            spp_code == "BKS" ~ "brook_silverside",
+                            spp_code == "LED" ~ "least_darter",
+                            spp_code == "LGP" ~ "logperch",
+                            spp_code == "SLR" ~ "silver_redhorse",
+                            spp_code == "HHC" ~ "hornyhead_chub",
+                            spp_code == "MUE" ~ "muskellunge",
+                            spp_code == "TRP" ~ "trout_perch",
+                            spp_code == "RHS" ~ "redhorse",
+                            spp_code == "CAP" ~ "common_carp",
+                            spp_code == "MMS" ~ "mimic_shiner",
+                            spp_code == "EMS" ~ "emerald_shiner",
+                            spp_code == "SUN" ~ "sunfish",
+                            spp_code == "CRC" ~ "creek_chub",
+                            spp_code == "GSF" ~ "green_sunfish",
+                            spp_code == "SFS" ~ "spotfin_shiner",
+                            spp_code == "SHI" ~ "shiners",
+                            spp_code == "BST" ~ "brook_stickleback",
+                            spp_code == "CSR" ~ "central_stoneroller",
+                            spp_code == "SDS" ~ "sand_shiner",
+                            spp_code == "GRR" ~ "greater_redhorse",
+                            spp_code == "PGS" ~ "pugnose_shiner",
+                            spp_code == "SMS" ~ "slimy_sculpin",
+                            spp_code == "LND" ~ "longnose_dace",
+                            spp_code == "FRD" ~ "freshwater_drum",
+                            spp_code == "WHC" ~ "white_crappie",
+                            spp_code == "DAR" ~ "darters",
+                            spp_code == "SAR" ~ "sauger",
+                            spp_code == "FCF" ~ "flathead_catfish",
+                            spp_code == "BMS" ~ "bigmouth_shiner",
+                            spp_code == "LKS" ~ "lake_sturgeon",
+                            spp_code == "LKW" ~ "lake_whitefish",
+                            spp_code == "BRM" ~ "brassy_minnow",
+                            spp_code == "SLM" ~ "mississippi_silvery_minnow",
+                            spp_code == "GLR" ~ "golden_redhorse",
+                            spp_code == "OTS" ~ "suckers",
+                            spp_code == "NST" ~ "ninespine_stickleback",
+                            spp_code == "GOE" ~ "goldeye",
+                            spp_code == "QBS" ~ "quillback",
+                            spp_code == "RVS" ~ "river_shiner",
+                            spp_code == "LES" ~ "longear_sunfish",
+                            spp_code == "CHL" ~ "chestnut_lamprey",
+                            spp_code == "RRH" ~ "river_redhorse",
+                            spp_code == "WHB" ~ "white_bass",
+                            spp_code == "OSS" ~ "orangespotted_sunfish",
+                            spp_code == "STC" ~ "stonecat",
+                            spp_code == "SNG" ~ "shortnose_gar",
+                            spp_code == "RFS" ~ "rosyface_shiner",
+                            spp_code == "CMS" ~ "carmine_shiner",
+                            spp_code == "SAB" ~ "smallmouth_buffalo",
+                            spp_code == "GIS" ~ "gizzard_shad",
+                            spp_code == "LNG" ~ "longnose_gar",
+                            spp_code == "RCS" ~ "river_carpsucker",
+                            spp_code == "SLS" ~ "shovelnose_sturgeon",
+                            spp_code == "LAT" ~ "lake_trout",
+                            spp_code == "TME" ~ "tiger_muskellunge",
+                            spp_code == "PRD" ~ "pearl_dace",
+                            spp_code == "PLS" ~ "pallid_shiner",
+                            spp_code == "RBS" ~ "rainbow_smelt",
+                            spp_code == "RBD" ~ "rainbow_darter",
+                            spp_code == "LNS" ~ "longnose_sucker",
+                            spp_code == "SJC" ~ "shortjaw_cisco",
+                            spp_code == "DWS" ~ "deepwater_sculpin",
+                            spp_code == "SHS" ~ "spoonhead_sculpin",
+                            spp_code == "BDD" ~ "banded_darter",
+                            spp_code == "MOE" ~ "mooneye",
+                            spp_code == "BLS" ~ "blue_sucker",
+                            spp_code == "SLC" ~ "silver_chub",
+                            spp_code == "HFS" ~ "highfin_carpsucker",
+                            spp_code == "MCP" ~ "mirror_carp",
+                            spp_code == "WAS" ~ "walleye/sauger",
+                            spp_code == "AME" ~ "american_eel",
+                            spp_code == "GOF" ~ "goldfish",
+                            spp_code == "SPS" ~ "spotted_sucker",
+                            spp_code == "PAH" ~ "paddlefish",
+                            spp_code == "RVD" ~ "river_darter",
+                            spp_code == "NHS" ~ "northern_hog_sucker",
+                            spp_code == "BHM" ~ "bullhead_minnow",
+                            spp_code == "WSD" ~ "western_sand_darter",
+                            spp_code == "MDD" ~ "mud_darter",
+                            spp_code == "SIL" ~ "silver_lamprey",
+                            spp_code == "SKJ" ~ "skipjack_herring",
+                            spp_code == "PGM" ~ "pugnose_minnow",
+                            spp_code == "BKB" ~ "black_buffalo",
+                            spp_code == "FTD" ~ "fantail_darter",
+                            spp_code == "YLB" ~ "yellow_bass",
+                            spp_code == "PRP" ~ "pirate_perch",
+                            spp_code == "LKC" ~ "lake_chub",
+                            spp_code == "RIR" ~ "river_ruffe",
+                            spp_code == "WHP" ~ "white_perch",
+                            spp_code == "ALW" ~ "alewife",
+                            spp_code == "SEL" ~ "sea_lamprey",
+                            spp_code == "BHC" ~ "bighead_carp",
+                            spp_code == "GLD" ~ "gilt_darter",
+                            spp_code == "CRD" ~ "crystal_darter",
+                            spp_code == "SMT" ~ "speckled_madtom",
+                            spp_code == "RDS" ~ "red_shiner",
+                            spp_code == "WAM" ~ "warmouth",
+                            spp_code == "CIS" ~ "cisco",
+                            spp_code == "CPS" ~ "carpsucker",
+                            spp_code == "CRP" ~ "crappie",
+                            spp_code == "HCR" ~ "hybrid_crappie",
+                            spp_code == "SCU" ~ "sculpin",
+                            spp_code == "SHD" ~ "slenderhead_darter",
+                            spp_code == "SIP" ~ "northern_pike_silver_phase",
+                            spp_code == "UK1" ~ "unknown_fish",
+                            spp_code == "UK2" ~ "unknown_fish",
+                            # below unknown codes specified as such
+                            spp_code == "LXB" ~ "see_ambiguous_species_code",
+                            TRUE ~ spp_code
+                          ),
+         #now fix some that are spelt out
+         species = str_replace(species, " ", "_"),
+         species = tolower(species)) %>% 
+  select(-spp_code) %>% 
+  relocate(species, .after = sample_date)
+
+hg_data_trial %>% 
+  group_by(species) %>% 
+  count() %>% 
+  print(n = nrow(.))
+#there are some ambitious codes remaining but they aren't important for predictive modeling here
+```
+
+I did not standardize some of the columns not important to predictive modeling (ex. sex, notes)
+
+# save data
+```{r}
+write_csv(hg_data_trial, "hg_data_comb_12DEC2025.csv")
+```
+
