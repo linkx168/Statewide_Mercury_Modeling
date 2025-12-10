@@ -35,7 +35,7 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
+mw_hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
 ```
 
 # landcover exploration 
@@ -241,6 +241,44 @@ ggplot() +
         legend.text = element_text(size = 7),
         legend.title = element_text(size = 8))
 #ggsave("map_pred_samples.jpg", height = 6, width = 5, dpi = 600)
+
+###############map with species faceted#############################
+data_for_map <- mw_hg_prep %>% 
+  mutate(species = case_when(species == "black_crappie" ~ "Black Crappie",
+                             species == "bluegill" ~ "Bluegill",
+                             species == "largemouth_bass" ~ "Largemouth Bass",
+                             species == "northern_pike" ~ "Northern Pike",
+                             species == "walleye" ~ "Walleye",
+                             species == "yellow_perch" ~ "Yellow Perch",
+                             species == "white_sucker" ~ "White Sucker")) %>% 
+  group_by(lagos_id, species) %>% 
+  summarise(n_samples = n())
+
+lat_lon <-mw_hg %>% 
+  distinct(lagos_id, lat_decdeg, lon_decdeg)
+
+data_for_map <- data_for_map %>% 
+  left_join(lat_lon)
+rm(lat_lon)
+
+data_for_map <- data_for_map %>%
+  st_as_sf(coords = c("lon_decdeg", "lat_decdeg"), 
+           crs = 4326) 
+
+ggplot() +
+  geom_sf(data = states, fill = "white", color = "black") +
+  geom_sf(data = data_for_map, aes(size = n_samples), shape = 21, color = "blue", fill = "orange", alpha = .7) +
+  scale_size(name = "Number of Samples") +
+  facet_wrap(~species) +
+  theme_minimal() +
+  theme(legend.position = c(.65, .15),
+    legend.key.size = unit(0.6, "lines"),
+    legend.title = element_text(size = 10),
+    legend.text  = element_text(size = 8),
+    legend.spacing.x = unit(0.4, "cm"),
+    legend.spacing.y = unit(0.4, "cm"),
+    axis.text.x = element_text(angle = 30, hjust = 1)) 
+#ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
 rm(states, data_for_map)
 ```
 
@@ -251,9 +289,9 @@ rm(states, data_for_map)
 ```{r}
 # write_csv(hg.data.loo.mw, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -394,18 +432,30 @@ hg.data.loo.mw <- hg.data.loo.mw %>%
 left_out_scaled <- left_out_scaled %>% 
   mutate(lagos_id = as.character(lagos_id))
 
+
 # filtering out fish +/- 3 SD
 hg.data.loo.mw <- hg.data.loo.mw %>% 
   filter(scaled_length >= -3 & scaled_length <= 3)
-```
 
-# summary of data that was left out
-Here we get a summary of:
+left_out_scaled <- left_out_scaled %>% 
+  filter(scaled_length >= -3 & scaled_length <= 3)
+```
+*We loose 19 spec-lake combos in the training data (hg.data.loo.mw) when trimming for scaled length*
+*We loose 2 spec-lake combos in the training data (hg.data.loo.mw) when trimming for scaled length*
+
+
+# summary of data for modeling
 1. how many total lakes were left out
 2. partial lakes with no walleye remaining
 3. partial lakes with walleye or nop remaining
+4. how many lakes in the training data
+5. how many spec-lake in the training data
 ```{r}
+#lakes in the training data?
 train_lakes <- unique(hg.data.loo.mw$lagos_id)
+#see lake count in the environment 
+
+#how many lakes left out?
 left_out_scaled <- left_out_scaled %>% 
   mutate(lake_status = case_when(lagos_id %in% train_lakes ~ "partial",
                                  TRUE ~ "new"))
@@ -420,13 +470,22 @@ left_out_scaled <- left_out_scaled %>%
 
 left_out_scaled <- left_out_scaled %>% 
   mutate(species_case = case_when(lake_status == "new" ~ "new_lake",
-                                  map_lgl(species_present, ~ !("WAE" %in% .x | "NOP" %in% .x)) ~ "partial_no_wae_nop",
+                                  map_lgl(species_present, ~ !("walleye" %in% .x | "northern_pike" %in% .x)) ~ "partial_no_wae_nop",
                                   TRUE ~ "partial_wae_or_nop"))
 
 
+#how many total lake-spec in training data
+hg.data.loo.mw %>% 
+  distinct(lagos_id, species) %>% 
+  count()
+
 left_out_scaled %>%
   distinct(lagos_id, species, .keep_all = T) %>% 
-  group_by(species_case) %>% 
+  count()
+
+
+left_out_scaled %>% 
+  distinct(lagos_id) %>% 
   count()
 
 rm(train_lakes, train_species_by_lake)
@@ -434,22 +493,22 @@ rm(train_lakes, train_species_by_lake)
 
 # fit model
 ```{r}
-fit <- brm(log_hgppm ~
-                 scaled_length*species +
-                 species +
-                 scaled_logit_wetwood +
-             scaled_logit_wetemerge +
-                 scaled_logit_formix +
-             scaled_logit_forcon +
-             scaled_logit_fordec +
-                 scaled_log_ws_area_ratio +
-                 scaled_log_area +
-                 (1|lagos_id),
-                      data = hg.data.loo.mw,
-                      iter = 10000,
-                      warmup = 500,
-                     chains = 3,
-                      family = gaussian())
+# fit <- brm(log_hgppm ~
+#                  scaled_length*species +
+#                  species +
+#                  scaled_logit_wetwood +
+#              scaled_logit_wetemerge +
+#                  scaled_logit_formix +
+#              scaled_logit_forcon +
+#              scaled_logit_fordec +
+#                  scaled_log_ws_area_ratio +
+#                  scaled_log_area +
+#                  (1|lagos_id),
+#                       data = hg.data.loo.mw,
+#                       iter = 10000,
+#                       warmup = 500,
+#                      chains = 3,
+#                       family = gaussian())
 
 # saveRDS(fit, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
