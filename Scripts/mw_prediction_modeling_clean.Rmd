@@ -574,7 +574,7 @@ predictions_summary_original <- left_out_scaled %>%
 # predicitons at the lake-species level - ignores fish level variation 
 Lets compare how well we predict the observed mean within a species-lake:
 1. calculate the mean values within a species-lake (we will use the same length of fish for predictions so we won't have to worry about that)
-2. from the predicted values, calculate the mean of value of each spec-lake-year. This would mean averaging across species, lake, .draw. (grouping by draw gets us each observation within lake-species-year and thus a mean mercury value for the grouping) - we will get 500 draws of each mean
+2. from the predicted values, calculate the mean of value of each spec-lake. This would mean averaging across species, lake, .draw. (grouping by draw gets us each observation within lake-species and thus a mean mercury value for the grouping) - we will get 500 draws of each mean
 3. compare the observed mean to the predicted mean
 ```{r}
 # we group by .draw here so that we get an average of all fish in a lake-spec within a draw
