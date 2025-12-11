@@ -35,7 +35,7 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
+mw_hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
 ```
 
 # landcover exploration 
@@ -289,9 +289,9 @@ rm(states, data_for_map)
 ```{r}
 # write_csv(hg.data.loo.mw, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -1061,18 +1061,18 @@ fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
 #predicting at the lake-spec level 
 #####here we can change the number of draws###########
 lake_spec_pred <- pred_full %>% 
-  add_predicted_draws(fit, ndraws = 500, allow_new_levels = TRUE)
+  add_epred_draws(fit, ndraws = 500, allow_new_levels = TRUE)
 rm(fit, pred_full)
 
 #here we have 500 draw for each row because there is only one length within each lake-spec
 lake_spec_sum <- lake_spec_pred %>% 
   #prediction in original scale
-  mutate(back_transformed = exp(.prediction)) %>% 
+  mutate(back_transformed = exp(.epred)) %>% 
   group_by(lagos_id, species) %>% 
   summarise(
-    log_hgppm = median(.prediction),
-    log_lower = quantile(.prediction, 0.05),
-    log_upper = quantile(.prediction, 0.95),
+    log_hgppm = median(.epred),
+    log_lower = quantile(.epred, 0.05),
+    log_upper = quantile(.epred, 0.95),
     hgppm = median(back_transformed),
     lower = quantile(back_transformed, 0.05),
     upper = quantile(back_transformed, 0.95),
