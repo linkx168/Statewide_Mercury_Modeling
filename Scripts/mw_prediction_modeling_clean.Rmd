@@ -35,7 +35,14 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_data_comb_12DEC2025.csv"))
+mw_hg <- read_csv(file.path("G:",
+                            "Shared drives",
+                            "Hansen Lab",
+                            "RESEARCH PROJECTS",
+                            "Statewide mercury modeling",
+                            "Predictive Modeling",
+                            "Data",
+                            "hg_data_comb_12DEC2025.csv"))
 ```
 
 # landcover exploration 
@@ -147,6 +154,7 @@ mw_hg_prep <- mw_hg_prep %>%
 ```
 
 # leave out data
+-leave out 15% of species-lake combinations
 ```{r}
 set.seed(10)
 
@@ -203,85 +211,6 @@ mw_hg_prep %>%
 rm(loo_spec_lakes)
 ```
 
-# map of data
-```{r}
-library(arrow)
-library(sf)
-library(maps)
-
-data_for_map <- mw_hg_prep %>% 
-  group_by(lagos_id) %>% 
-  summarise(n_samples = n(),
-            n_spec = n_distinct(species))
-lat_lon <-mw_hg %>% 
-  distinct(lagos_id, lat_decdeg, lon_decdeg)
-
-data_for_map <- data_for_map %>% 
-  left_join(lat_lon)
-rm(lat_lon)
-
-# making map
-states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
-  filter(ID %in% c("minnesota", "wisconsin"))
-
-data_for_map <- data_for_map %>%
-  st_as_sf(coords = c("lon_decdeg", "lat_decdeg"), 
-           crs = 4326) 
-
-ggplot() +
-  geom_sf(data = states, fill = "white", color = "black") +
-  geom_sf(data = data_for_map, aes(size = n_samples, color = n_spec)) +
-  scale_size(name = "Number of Samples") +
-  scale_color_viridis_c(option = "plasma", name = "Number of Species") +
-  theme_minimal() +
-  theme(legend.position = c(.78,.65),
-        legend.title.align =  0.5,
-        legend.key.height = unit(0.3, "cm"),
-        legend.key.width  = unit(0.3, "cm"),
-        legend.text = element_text(size = 7),
-        legend.title = element_text(size = 8))
-#ggsave("map_pred_samples.jpg", height = 6, width = 5, dpi = 600)
-
-###############map with species faceted#############################
-data_for_map <- mw_hg_prep %>% 
-  mutate(species = case_when(species == "black_crappie" ~ "Black Crappie",
-                             species == "bluegill" ~ "Bluegill",
-                             species == "largemouth_bass" ~ "Largemouth Bass",
-                             species == "northern_pike" ~ "Northern Pike",
-                             species == "walleye" ~ "Walleye",
-                             species == "yellow_perch" ~ "Yellow Perch",
-                             species == "white_sucker" ~ "White Sucker")) %>% 
-  group_by(lagos_id, species) %>% 
-  summarise(n_samples = n())
-
-lat_lon <-mw_hg %>% 
-  distinct(lagos_id, lat_decdeg, lon_decdeg)
-
-data_for_map <- data_for_map %>% 
-  left_join(lat_lon)
-rm(lat_lon)
-
-data_for_map <- data_for_map %>%
-  st_as_sf(coords = c("lon_decdeg", "lat_decdeg"), 
-           crs = 4326) 
-
-ggplot() +
-  geom_sf(data = states, fill = "white", color = "black") +
-  geom_sf(data = data_for_map, aes(size = n_samples), shape = 21, color = "blue", fill = "orange", alpha = .7) +
-  scale_size(name = "Number of Samples") +
-  facet_wrap(~species) +
-  theme_minimal() +
-  theme(legend.position = c(.65, .15),
-    legend.key.size = unit(0.6, "lines"),
-    legend.title = element_text(size = 10),
-    legend.text  = element_text(size = 8),
-    legend.spacing.x = unit(0.4, "cm"),
-    legend.spacing.y = unit(0.4, "cm"),
-    axis.text.x = element_text(angle = 30, hjust = 1)) 
-#ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
-rm(states, data_for_map)
-```
-
 # saved leave out data
 -read in saved fish data with some left out
 -anti join to who fish data set that has been prepped
@@ -289,9 +218,9 @@ rm(states, data_for_map)
 ```{r}
 # write_csv(hg.data.loo.mw, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -422,8 +351,7 @@ left_out_scaled <- left_out_data %>%
            scaled_logit_fordec = (logit_fordec - lake_scalers$mean_logit_fordec) / lake_scalers$sd_logit_fordec,
            
            scaled_log_ws_area_ratio = (log_ws_area_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio
-  ) %>% 
-  mutate(log_hg = log(hg_ppm))
+  ) 
 rm(left_out_data)
 
 hg.data.loo.mw <- hg.data.loo.mw %>% 
@@ -438,11 +366,105 @@ hg.data.loo.mw <- hg.data.loo.mw %>%
   filter(scaled_length >= -3 & scaled_length <= 3)
 
 left_out_scaled <- left_out_scaled %>% 
-  filter(scaled_length >= -3 & scaled_length <= 3)
+  filter(scaled_length >= -3 & scaled_length <= 3) %>% 
+  select(-length_mean, -length_sd)
 ```
 *We loose 19 spec-lake combos in the training data (hg.data.loo.mw) when trimming for scaled length*
 *We loose 2 spec-lake combos in the training data (hg.data.loo.mw) when trimming for scaled length*
 
+# map of data
+```{r}
+#quick combination for mapping
+analysis_total <- bind_rows(left_out_scaled %>% 
+                              mutate(data = "Left Out"), 
+                            hg.data.loo.mw %>%
+                              mutate(data = "Training"))
+
+analysis_total <- analysis_total %>% 
+  mutate(data = as.factor(data),
+         data = factor(data, levels = c("Training", "Left Out")))
+
+data_for_map <- analysis_total %>% 
+  group_by(lagos_id) %>% 
+  summarise(n_samples = n(),
+            n_spec = n_distinct(species))
+
+lat_lon <-mw_hg %>% 
+  distinct(lagos_id, lat_decdeg, lon_decdeg)
+
+data_for_map <- data_for_map %>% 
+  left_join(lat_lon %>% 
+              mutate(lagos_id = as.character(lagos_id)))
+rm(lat_lon)
+
+# making map
+states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+  filter(ID %in% c("minnesota", "wisconsin"))
+
+data_for_map <- data_for_map %>%
+  st_as_sf(coords = c("lon_decdeg", "lat_decdeg"), 
+           crs = 4326) 
+
+ggplot() +
+  geom_sf(data = states, fill = "white", color = "black") +
+  geom_sf(data = data_for_map, aes(size = n_samples, color = n_spec)) +
+  scale_size(name = "Number of Samples") +
+  scale_color_viridis_c(option = "plasma", name = "Number of Species") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.title.align =  0.5,
+        legend.key.height = unit(0.3, "cm"),
+        legend.key.width  = unit(0.3, "cm"),
+        legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8))
+#ggsave("map_pred_samples.jpg", height = 6, width = 6, dpi = 600)
+
+###############all samples (left out and traning)#############################
+data_for_map <- analysis_total %>% 
+  mutate(species = case_when(species == "black_crappie" ~ "Black Crappie",
+                             species == "bluegill" ~ "Bluegill",
+                             species == "largemouth_bass" ~ "Largemouth Bass",
+                             species == "northern_pike" ~ "Northern Pike",
+                             species == "walleye" ~ "Walleye",
+                             species == "yellow_perch" ~ "Yellow Perch",
+                             species == "white_sucker" ~ "White Sucker")) %>% 
+  group_by(lagos_id, species, data) %>% 
+  summarise(n_samples = n())
+
+lat_lon <-mw_hg %>% 
+  distinct(lagos_id, lat_decdeg, lon_decdeg)
+
+data_for_map <- data_for_map %>% 
+  left_join(lat_lon %>% 
+              mutate(lagos_id = as.character(lagos_id)))
+rm(lat_lon)
+
+data_for_map <- data_for_map %>%
+  st_as_sf(coords = c("lon_decdeg", "lat_decdeg"), 
+           crs = 4326) 
+
+ggplot() +
+  geom_sf(data = states, fill = "white", color = "black") +
+  geom_sf(data = subset(data_for_map, data == "Training"), aes(size = n_samples, color = data), alpha = .7) +
+  geom_sf(data = subset(data_for_map, data == "Left Out"), aes(size = n_samples, color = data), alpha = .7) +
+  scale_color_manual("Data", values = c("Training" = "navy", 
+                                "Left Out" = "orange")) +
+  scale_size(name = "Number of Samples") +
+  facet_wrap(~species) +
+  guides(color = guide_legend(direction = "horizontal"),
+         size = guide_legend(direction = "horizontal")) +
+  theme_minimal() +
+  theme(legend.position = c(.69, .15),
+        legend.box = "horiztonal",
+    legend.key.size = unit(0.6, "lines"),
+    legend.title = element_text(size = 10),
+    legend.text  = element_text(size = 8),
+    legend.spacing.x = unit(0.4, "cm"),
+    legend.spacing.y = unit(0.4, "cm"),
+    axis.text.x = element_text(angle = 30, hjust = 1)) 
+ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
+rm(states, data_for_map)
+```
 
 # summary of data for modeling
 1. how many total lakes were left out
@@ -468,11 +490,22 @@ left_out_scaled <- left_out_scaled %>%
   left_join(train_species_by_lake, by = "lagos_id") %>% 
   mutate(species_present = replace_na(species_present, list(character())))
 
-left_out_scaled <- left_out_scaled %>% 
-  mutate(species_case = case_when(lake_status == "new" ~ "new_lake",
-                                  map_lgl(species_present, ~ !("walleye" %in% .x | "northern_pike" %in% .x)) ~ "partial_no_wae_nop",
-                                  TRUE ~ "partial_wae_or_nop"))
+left_out_sum <- left_out_scaled %>% 
+  group_by(species, lake_status) %>% 
+  summarise(n_lakes = n_distinct(lagos_id),
+            n = n())
+left_out_sum
+write_csv(left_out_sum, "left_out_sum.csv")
+rm(left_out_sum)
 
+left_out_scaled %>% 
+  group_by(lake_status) %>% 
+  summarise(n_lakes = n_distinct(lagos_id),
+            n = n())
+
+left_out_scaled %>% 
+  summarise(n_lakes = n_distinct(lagos_id),
+            n = n())
 
 #how many total lake-spec in training data
 hg.data.loo.mw %>% 
@@ -483,12 +516,30 @@ left_out_scaled %>%
   distinct(lagos_id, species, .keep_all = T) %>% 
   count()
 
-
 left_out_scaled %>% 
   distinct(lagos_id) %>% 
   count()
 
-rm(train_lakes, train_species_by_lake)
+#quick overall summary
+counts <- analysis_total %>% 
+  group_by(species, data) %>% 
+  summarise(n_lakes = n_distinct(lagos_id),
+            n_fish = n()) %>% 
+  arrange(species)
+write_csv(counts, "counts.csv")
+rm(counts)
+
+analysis_total %>% 
+  group_by(data) %>% 
+  summarise(n_lakes = n_distinct(lagos_id),
+            n_fish = n())
+
+analysis_total %>% 
+  summarise(n_lakes = n_distinct(lagos_id),
+            n_fish = n())
+  
+
+rm(train_lakes, train_species_by_lake, analysis_total)
 ```
 
 # fit model
