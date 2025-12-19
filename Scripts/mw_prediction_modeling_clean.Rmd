@@ -462,7 +462,7 @@ ggplot() +
     legend.spacing.x = unit(0.4, "cm"),
     legend.spacing.y = unit(0.4, "cm"),
     axis.text.x = element_text(angle = 30, hjust = 1)) 
-ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
+#ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
 rm(states, data_for_map)
 ```
 
@@ -495,7 +495,7 @@ left_out_sum <- left_out_scaled %>%
   summarise(n_lakes = n_distinct(lagos_id),
             n = n())
 left_out_sum
-write_csv(left_out_sum, "left_out_sum.csv")
+#write_csv(left_out_sum, "left_out_sum.csv")
 rm(left_out_sum)
 
 left_out_scaled %>% 
@@ -526,7 +526,7 @@ counts <- analysis_total %>%
   summarise(n_lakes = n_distinct(lagos_id),
             n_fish = n()) %>% 
   arrange(species)
-write_csv(counts, "counts.csv")
+#write_csv(counts, "counts.csv")
 rm(counts)
 
 analysis_total %>% 
@@ -539,7 +539,7 @@ analysis_total %>%
             n_fish = n())
   
 
-rm(train_lakes, train_species_by_lake, analysis_total)
+rm(train_lakes, train_species_by_lake)
 ```
 
 # fit model
@@ -585,44 +585,9 @@ predictions <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH
 rm(fit)
 ```
 
-# summary from predictions 
-1. We do this on the log scale
-2. We do this on the original scale (backtransformed)
-```{r}
-#summary of the draws for each prediction (on log scale)
-predictions_summary <- predictions %>% 
-  group_by(lagos_id, hg_ppm, length_in, species, .row) %>%
-  summarise(.pred_sd = sd(.prediction),
-            .lower = quantile(.prediction, probs = c(0.025)),
-            .upper = quantile(.prediction, probs = c(0.975)),
-            .prediction = median(.prediction)) %>% 
-  mutate(lagos_id = as.character(lagos_id))
-
-#connect these predictions back to the original data
-predictions_summary <- left_out_scaled %>% 
-  #this is needed due to maybe duplicate spec-length-hgppm-year-lake
-  distinct(lagos_id, species, hg_ppm, length_in, species, .keep_all = T) %>% 
-  left_join(predictions_summary, by = c("lagos_id", "hg_ppm", "length_in", "species"))
-
-##############################################################################
-
-#summary of predictions in the original scale (back transformed)
-predictions_summary_original <- predictions %>% 
-  mutate(.prediction = exp(.prediction)) %>% 
-  group_by(lagos_id, hg_ppm, length_in, species, .row) %>%
-  summarise(.pred_sd = sd(.prediction),
-            .lower = quantile(.prediction, probs = c(0.025)),
-            .upper = quantile(.prediction, probs = c(0.975)),
-            .prediction = median(.prediction)) %>% 
-  mutate(lagos_id = as.character(lagos_id))
-
-predictions_summary_original <- left_out_scaled %>% 
-  #this is needed due to there being some duplicate spec-length-hgppm-year-lake
-  distinct(lagos_id, species, hg_ppm, length_in, species, .keep_all = T) %>% 
-  left_join(predictions_summary_original, by = c("lagos_id", "hg_ppm", "length_in", "species"))
-```
 
 # predicitons at the lake-species level - ignores fish level variation 
+
 Lets compare how well we predict the observed mean within a species-lake:
 1. calculate the mean values within a species-lake (we will use the same length of fish for predictions so we won't have to worry about that)
 2. from the predicted values, calculate the mean of value of each spec-lake. This would mean averaging across species, lake, .draw. (grouping by draw gets us each observation within lake-species and thus a mean mercury value for the grouping) - we will get 500 draws of each mean
@@ -630,147 +595,7 @@ Lets compare how well we predict the observed mean within a species-lake:
 ```{r}
 # we group by .draw here so that we get an average of all fish in a lake-spec within a draw
 #we essentially get 500 estimates of each lake-spec average value across all lengths
-lake_species_preds <- predictions %>% 
-  group_by(lagos_id, species, .draw) %>% 
-  summarise(mean_pred = mean(.prediction))  %>% 
-  ungroup() %>% 
-  group_by(lagos_id, species) %>% 
-  median_qi(mean_pred) %>% 
-  select(-.width,
-         -.point,
-         -.interval) %>% 
-  mutate(lagos_id = as.character(lagos_id))
-
-lake_species_obs <- left_out_scaled %>% 
-  group_by(lagos_id, species) %>% 
-  summarise(mean_obs = mean(log_hg))
-
-lake_species_compare <- left_join(lake_species_preds, lake_species_obs, by = c("lagos_id", "species"))
-rm(lake_species_preds, lake_species_obs)
-
-
-lake_species_metrics <- lake_species_compare %>%
-  mutate(
-    error = abs(mean_obs - mean_pred),
-    squared_error = (mean_obs - mean_pred)^2,
-    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
-    interval_width = .upper - .lower
-  ) %>% 
-  summarise(
-    MAE = mean(error, na.rm = TRUE),
-    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
-    coverage = mean(within_interval, na.rm = TRUE),
-    avg_interval_width = mean(interval_width, na.rm = TRUE)
-  )
-lake_species_metrics
-
-#what about by various groupings?
-
-loo_lakes <- left_out_scaled %>% 
-  distinct(lagos_id, species, lake_status, species_present, species_case)
-
-lake_species_compare <- lake_species_compare %>% 
-  left_join(loo_lakes)
-
-lake_species_compare %>%
-  mutate(
-    error = abs(mean_obs - mean_pred),
-    squared_error = (mean_obs - mean_pred)^2,
-    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
-    interval_width = .upper - .lower
-  ) %>%
-  group_by(lake_status) %>% 
-  summarise(
-    MAE = mean(error, na.rm = TRUE),
-    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
-    coverage = mean(within_interval, na.rm = TRUE),
-    avg_interval_width = mean(interval_width, na.rm = TRUE)
-  )
-
-lake_species_compare %>%
-  filter(lake_status != "new") %>% 
-  mutate(
-    error = abs(mean_obs - mean_pred),
-    squared_error = (mean_obs - mean_pred)^2,
-    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
-    interval_width = .upper - .lower
-  ) %>% 
-  group_by(species_case) %>% 
-  summarise(
-    MAE = mean(error, na.rm = TRUE),
-    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
-    coverage = mean(within_interval, na.rm = TRUE),
-    avg_interval_width = mean(interval_width, na.rm = TRUE)
-  )
-
-lake_species_compare %>% 
-ggplot(aes(x = mean_obs, y = mean_pred)) +
-  geom_point(alpha = 0.7, size = 2) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  labs(
-    x = "Observed log(Hg)",
-    y = "Predicted log(Hg)",
-  ) +
-  theme_minimal()
-
-lake_species_compare %>%
-  group_by(species) %>% 
-  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
-  mutate(.row = row_number()) %>% 
-  ggplot(aes(x = .row)) +
-  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
-  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
-  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
-  geom_hline(yintercept = log(0.22), linetype = "dashed") +
-  facet_wrap(~species, scales = "free") +
-  labs(
-    x = "Observation",
-    y = "Mercury Concentrationn\n(log transformed for display)") +
-  theme_minimal() +
-  theme(axis.text.x = element_blank()) +
-  guides(color = guide_legend("Legend")) +
-  theme(legend.position = "top")
-
-lake_species_compare %>%
-  group_by(species) %>% 
-  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
-  mutate(.row = row_number()) %>% 
-  ggplot(aes(x = .row)) +
-  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
-  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
-  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
-  geom_hline(yintercept = log(0.22), linetype = "dashed") +
-  facet_grid(species~lake_status, scales = "free") +
-  labs(
-    x = "Observation",
-    y = "Mercury Concentrationn\n(log transformed for display)") +
-  theme_minimal() +
-  theme(axis.text.x = element_blank()) +
-  guides(color = guide_legend("Legend")) +
-  theme(legend.position = "top")
-
-#lets filter for where the partial miss to see how viz how badly 
-lake_species_compare %>%
-  filter(mean_obs <= .lower | mean_obs >= .upper) %>% 
-  group_by(species) %>% 
-  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
-  mutate(.row = row_number()) %>% 
-  ggplot(aes(x = .row)) +
-  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
-  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
-  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
-  geom_hline(yintercept = log(0.22), linetype = "dashed") +
-  facet_grid(species~lake_status, scales = "free") +
-  labs(
-    x = "Observation",
-    y = "Mercury Concentrationn\n(log transformed for display)") +
-  theme_minimal() +
-  theme(axis.text.x = element_blank()) +
-  guides(color = guide_legend("Legend")) +
-  theme(legend.position = "top")
-
-###############################################################################
-#lets do this on the back transformed scale as well
+#lets do this on the back transformed scale 
 lake_species_preds <- predictions %>% 
   group_by(lagos_id, species, .draw) %>% 
   summarise(mean_pred = mean(exp(.prediction)))  %>% 
@@ -807,7 +632,7 @@ lake_species_metrics
 
 #what about by various groupings?
 loo_lakes <- left_out_scaled %>% 
-  distinct(lagos_id, species, lake_status, species_present, species_case)
+  distinct(lagos_id, species, lake_status, species_present)
 
 lake_species_compare <- lake_species_compare %>% 
   left_join(loo_lakes)
@@ -820,28 +645,61 @@ lake_species_compare %>%
                                   TRUE ~ "n")) %>% 
   group_by(obs_harmful,
            pred_harmful) %>% 
-  count()
+  count() %>% 
+  ungroup() %>% 
+  mutate(total_lakes = sum(n),
+         prop = n/total_lakes)
+  
 
 lake_species_compare %>% 
-  filter(lake_status == "new") %>% 
   mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
                                  TRUE ~ "n"),
          pred_harmful = case_when(mean_pred >= .22 ~ "y",
                                   TRUE ~ "n")) %>% 
   group_by(obs_harmful,
            pred_harmful) %>% 
-  count()
+  count() %>% 
+  mutate(correct = case_when(obs_harmful == "y" & pred_harmful == "y" ~ "y",
+                             obs_harmful == "n" & pred_harmful == "n" ~ "y",
+                             TRUE ~ "n")) %>% 
+  group_by(correct) %>% 
+  summarise(total = sum(n)) %>% 
+  mutate(total_lakes = sum(total),
+         prop = total/total_lakes)
 
+# by lake status
 lake_species_compare %>% 
-  filter(species_case == "partial_no_wae_nop") %>% 
+  group_by(lake_status) %>% 
   mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
                                  TRUE ~ "n"),
          pred_harmful = case_when(mean_pred >= .22 ~ "y",
                                   TRUE ~ "n")) %>% 
   group_by(obs_harmful,
-           pred_harmful) %>% 
-  count()
+           pred_harmful,
+           lake_status) %>% 
+  count() %>% 
+  group_by(lake_status) %>% 
+  mutate(total_lakes = sum(n),
+         prop = n/total_lakes)
 
+lake_species_compare %>% 
+  group_by(lake_status) %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  group_by(obs_harmful,
+           pred_harmful,
+           lake_status) %>% 
+  count() %>% 
+  group_by(lake_status) %>% 
+mutate(correct = case_when(obs_harmful == "y" & pred_harmful == "y" ~ "y",
+                             obs_harmful == "n" & pred_harmful == "n" ~ "y",
+                             TRUE ~ "n")) %>% 
+  group_by(lake_status, correct) %>% 
+  summarise(total = sum(n)) %>% 
+  mutate(total_lakes = sum(total),
+         prop = total/total_lakes)
 
 metrics <- lake_species_compare %>%
   mutate(
@@ -859,23 +717,6 @@ metrics <- lake_species_compare %>%
   )
 metrics
 
-metrics <- lake_species_compare %>%
-  filter(lake_status != "new") %>% 
-  mutate(
-    error = abs(mean_obs - mean_pred),
-    squared_error = (mean_obs - mean_pred)^2,
-    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
-    interval_width = .upper - .lower
-  ) %>% 
-  group_by(species_case) %>% 
-  summarise(
-    MAE = mean(error, na.rm = TRUE),
-    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
-    coverage = mean(within_interval, na.rm = TRUE),
-    avg_interval_width = mean(interval_width, na.rm = TRUE),
-    med_interval_width = median(interval_width)
-  )
-metrics
 
 lake_species_compare %>% 
 ggplot(aes(x = mean_obs, y = mean_pred, color = lake_status)) +
@@ -1294,159 +1135,23 @@ lake_spec_sum %>%
 #ggsave("risk_by_species.jpg", height = 5, width = 5, dpi = 600)
 ```
 
-#addtional analysis ideas
-1. post hoc ZM stuff
-  -ZM lakes that were sampled and unsampled, do we predict high risk? 
-2. compare predicted levels to state level guidance
-
-# quick leech specific 
+# lake covarites 
+-lets look if there are trends for lakes above and below 0.22ppm
+-group by variable where lakes are above and below 0.22ppm
+    -look at covaraites based on that split
 ```{r}
-########dataframe for lakes we would like to predict########################
-#lake link
-lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
-  distinct(lake_nhdid, .keep_all = T) %>% 
-  rename(nhdid = lake_nhdid)
 
-#crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("G:",
-                          "Shared drives",
-                          "Hansen Lab",
-                          "LAGOS data extraction",
-                          "lake_link.csv"))
-glimpse(xwalk)
+```
 
-#land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("G:",
-                          "Shared drives",
-                          "Hansen Lab",
-                          "LAGOS data extraction",
-                          "lagos_watershed_lulc.csv"))
-glimpse(lagos_watershed_lulc)
 
-most_recent_landcover <- lagos_watershed_lulc %>% 
-  filter(year == 2016) %>% 
-  select(-spatial_division,
-         -year,
-         -datacoveragepct,
-         -precision) %>% 
-  rename(lagoslakeid = zoneid)
-rm(lagos_watershed_lulc)
+# looking at length cross 0.22ppm 
+*This will be pretty memory intensive because we will have 500 draws for each of 80 lengths, of each 7 species, for every unique lake*
+-consider dialing in the lengths by species for where they are expected to cross (no super small or super big lengths, varying by species)
 
-#watershed attributes data
-lagos_watershed <- read_csv(file.path("G:",
-                          "Shared drives",
-                          "Hansen Lab",
-                          "LAGOS data extraction",
-                          "lake_watersheds.csv"))
-glimpse(lagos_watershed)
-
-#############join lagos data#####################
-covary <- lagos_watershed %>% 
-  left_join(most_recent_landcover) %>% 
-  mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
-                                str_detect(ws_states, "WI") ~ "y",
-                                TRUE ~ "n")) %>% 
-  filter(state_keep == "y")
-rm(lagos_watershed,
-   most_recent_landcover)
-
-#lets just grab the lagos id, nhdhr, name, and coords for cross walking
-xwalk <- xwalk %>% 
-  distinct(lagoslakeid,
-         lake_nhdid,
-         lake_namegnis,
-         lake_namelagos,
-         lake_lat_decdeg,
-         lake_lon_decdeg)
-
-#grabbing cross walk information via lagos id (really interested in the nhdhr)
-covary <- covary %>% 
-  left_join(xwalk, relationship = "one-to-one")
-#############################################################################
-pred_data <- covary %>% 
-  select(lagos_id = lagoslakeid,
-         ws_focallakewaterarea_ha,
-         ws_lake_arearatio,
-         nlcd_forcon42_pct,
-         nlcd_formix43_pct,
-         nlcd_fordec41_pct,
-         nlcd_wetemerg95_pct,
-         nlcd_wetwood90_pct,
-         ws_lat_decdeg,
-         ws_lon_decdeg) %>% 
-  filter(lagos_id %in% c("583",
-                       "996",
-                       "3119",
-                       "74155",
-                       "24367"))
-rm(covary, xwalk)
-##############################################################################
-#use scalers to put lakes in original data scale
-pred_data <- pred_data %>% 
-  filter(ws_lake_arearatio < 100) %>% 
-  filter(!is.na(ws_lake_arearatio)) %>%
-  filter(!is.na(nlcd_forcon42_pct)) %>% 
-  rename(lake_area_ha = ws_focallakewaterarea_ha,
-         watershed_lake_area_ratio = ws_lake_arearatio) %>% 
-  mutate(
-    #first, lets provide 0's in our landcover data with a very small number so they can be transfomred to logit scale
-  mutate(across(starts_with("nlcd"),
-                ~ifelse(.x ==0, 0.001, .x))) %>%
-  mutate(across(starts_with("nlcd"),
-                ~ifelse(.x ==100, 0.999, .x))) %>%  
-  #now apply logit transformations to landcover and log to others
-  mutate(logit_wetwood = car::logit(nlcd_wetwood90_pct),
-         logit_wetemerge = car::logit(nlcd_wetemerg95_pct),
-         logit_formix = car::logit(nlcd_formix43_pct),
-         logit_forcon = car::logit(nlcd_forcon42_pct),
-         logit_fordec = car::logit(nlcd_fordec41_pct),
-         log_area = log(lake_area_ha),
-         log_ws_area_ratio = log(watershed_lake_area_ratio))
-  ) %>% 
-  mutate(scaled_log_area = (log_area - lake_scalers$mean_log_area) /lake_scalers$sd_log_area,
-           
-           scaled_logit_wetwood = (logit_wetwood - lake_scalers$mean_logit_wetwood) / lake_scalers$sd_logit_wetwood,
-           
-           scaled_logit_wetemerge = (logit_wetemerge - lake_scalers$mean_logit_wetemerge) / lake_scalers$sd_logit_wetemerge,
-           
-           scaled_logit_formix = (logit_formix - lake_scalers$mean_logit_formix) / lake_scalers$sd_logit_formix,
-           
-           scaled_logit_forcon = (logit_forcon - lake_scalers$mean_logit_forcon) / lake_scalers$sd_logit_forcon,
-           
-           scaled_logit_fordec = (logit_fordec - lake_scalers$mean_logit_fordec) / lake_scalers$sd_logit_fordec,
-           
-           scaled_log_ws_area_ratio = (log_ws_area_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio)
-
-pred_spec <- tibble(species = c("walleye",
-                             "northern_pike",
-                             "black_crappie",
-                             "largemouth_bass",
-                             "bluegill",
-                             "white_sucker",
-                             "yellow_perch"),
-                    length = c(15,
-                               24,
-                               8.1,
-                               12,
-                               6.1,
-                               12,
-                               8.1)) %>% 
-  left_join(length_scalers,by = "species") %>% 
-  mutate(scaled_length = (length - length_mean)/length_sd)
-pred_spec
-
-#cross the datasets
-pred_full <- crossing(pred_data, pred_spec)
-rm(pred_data, pred_spec)
-#############################################################################
-fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
-
-#predicting at the lake-spec level 
-#####here we can change the number of draws###########
-lake_spec_pred <- pred_full %>% 
-  add_epred_draws(fit, ndraws = 500, allow_new_levels = TRUE)
-rm(pred_full)
-
+- use all lakes in the region 
+- cross it with a grid of lengths from each species 
+- get the length for when a species crosses 0.22 ppm in 1. lake 2.) region
+```{r}
 length_grid <- tidyr::crossing(
   species = c(
     "walleye",
@@ -1496,28 +1201,6 @@ lake_spec_sum <- lake_spec_pred %>%
     .groups = "drop"
   ) 
 rm(lake_spec_pred)
-
-glimpse(lake_spec_sum)
-
-ggplot(lake_spec_sum,
-       aes(x = factor(lagos_id),
-           y = species,
-           fill = hgppm)) +
-  geom_tile(color = "white") +
-  scale_fill_gradient2(
-    low = "blue",
-    mid = "white",
-    high = "red",
-    midpoint = 0.22,
-    name = "Predicted Hg (ppm)"
-  ) +
-  geom_text(
-    aes(label = scales::percent(prob_over, accuracy = 1)),
-    size = 3
-  ) +
-  labs(x = "Lake", y = "Species",
-       caption = "Text shows P(Hg > 0.22 ppm)") +
-  theme_minimal()
 
 length_threshold <- pred_grid %>% 
   filter(hgppm >= 0.22) %>% 
@@ -1613,6 +1296,167 @@ ggplot(
   ) +
   facet_wrap(lagos_id_words ~ species) +
   theme_minimal()
-#ggsave("leech_over_22.jpg", width = 5, height = 5, dpi = 600)
+```
+
+
+###################### old code##################################
+```{r}
+###########################################################################
+#predition summaries based on non-transformed data
+lake_species_preds <- predictions %>% 
+  group_by(lagos_id, species, .draw) %>% 
+  summarise(mean_pred = mean(.prediction))  %>% 
+  ungroup() %>% 
+  group_by(lagos_id, species) %>% 
+  median_qi(mean_pred) %>% 
+  select(-.width,
+         -.point,
+         -.interval) %>% 
+  mutate(lagos_id = as.character(lagos_id))
+
+lake_species_obs <- left_out_scaled %>% 
+  group_by(lagos_id, species) %>% 
+  summarise(mean_obs = mean(log_hgppm))
+
+lake_species_compare <- left_join(lake_species_preds, lake_species_obs, by = c("lagos_id", "species"))
+rm(lake_species_preds, lake_species_obs)
+
+
+lake_species_metrics <- lake_species_compare %>%
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+lake_species_metrics
+
+#what about by various groupings?
+
+loo_lakes <- left_out_scaled %>% 
+  distinct(lagos_id, species, lake_status, species_present)
+
+lake_species_compare <- lake_species_compare %>% 
+  left_join(loo_lakes)
+
+lake_species_compare %>%
+  mutate(
+    error = abs(mean_obs - mean_pred),
+    squared_error = (mean_obs - mean_pred)^2,
+    within_interval = ifelse(mean_obs >= .lower & mean_obs <= .upper, 1, 0),
+    interval_width = .upper - .lower
+  ) %>%
+  group_by(lake_status) %>% 
+  summarise(
+    MAE = mean(error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage = mean(within_interval, na.rm = TRUE),
+    avg_interval_width = mean(interval_width, na.rm = TRUE)
+  )
+
+
+lake_species_compare %>% 
+ggplot(aes(x = mean_obs, y = mean_pred)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "Observed log(Hg)",
+    y = "Predicted log(Hg)",
+  ) +
+  theme_minimal()
+
+lake_species_compare %>%
+  group_by(species) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_wrap(~species, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+lake_species_compare %>%
+  group_by(species) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_grid(species~lake_status, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+
+#lets filter for where the partial miss to see how viz how badly 
+lake_species_compare %>%
+  filter(mean_obs <= .lower | mean_obs >= .upper) %>% 
+  group_by(species) %>% 
+  arrange(mean_pred) %>%  # Arrange within each species by observed_orig
+  mutate(.row = row_number()) %>% 
+  ggplot(aes(x = .row)) +
+  geom_errorbar(aes(ymin = .lower, ymax = .upper), width = 0.2, color = "lightblue") +
+  geom_point(aes(y = mean_pred), color = "lightblue", size = 2, shape = 16) +
+  geom_point(aes(y = mean_obs), color = "black", size = 2, shape = 17, alpha = .5) +
+  geom_hline(yintercept = log(0.22), linetype = "dashed") +
+  facet_grid(species~lake_status, scales = "free") +
+  labs(
+    x = "Observation",
+    y = "Mercury Concentrationn\n(log transformed for display)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  guides(color = guide_legend("Legend")) +
+  theme(legend.position = "top")
+#############################################################################
+# prediction summaries 
+#summary of the draws for each prediction (on log scale)
+predictions_summary <- predictions %>% 
+  group_by(lagos_id, hg_ppm, length_in, species, .row) %>%
+  summarise(.pred_sd = sd(.prediction),
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction)) %>% 
+  mutate(lagos_id = as.character(lagos_id))
+
+#connect these predictions back to the original data
+predictions_summary <- left_out_scaled %>% 
+  #this is needed due to maybe duplicate spec-length-hgppm-year-lake
+  distinct(lagos_id, species, hg_ppm, length_in, species, .keep_all = T) %>% 
+  left_join(predictions_summary, by = c("lagos_id", "hg_ppm", "length_in", "species"))
+
+#summary of predictions in the original scale (back transformed)
+predictions_summary_original <- predictions %>% 
+  mutate(.prediction = exp(.prediction)) %>% 
+  group_by(lagos_id, hg_ppm, length_in, species, .row) %>%
+  summarise(.pred_sd = sd(.prediction),
+            .lower = quantile(.prediction, probs = c(0.025)),
+            .upper = quantile(.prediction, probs = c(0.975)),
+            .prediction = median(.prediction)) %>% 
+  mutate(lagos_id = as.character(lagos_id))
+
+predictions_summary_original <- left_out_scaled %>% 
+  #this is needed due to there being some duplicate spec-length-hgppm-year-lake
+  distinct(lagos_id, species, hg_ppm, length_in, species, .keep_all = T) %>% 
+  left_join(predictions_summary_original, by = c("lagos_id", "hg_ppm", "length_in", "species"))
+########################################################################
 ```
 
