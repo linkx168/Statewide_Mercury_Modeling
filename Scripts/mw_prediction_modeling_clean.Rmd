@@ -35,7 +35,7 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("G:",
+mw_hg <- read_csv(file.path("D:",
                             "Shared drives",
                             "Hansen Lab",
                             "RESEARCH PROJECTS",
@@ -218,9 +218,9 @@ rm(loo_spec_lakes)
 ```{r}
 # write_csv(hg.data.loo.mw, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -563,7 +563,7 @@ rm(train_lakes, train_species_by_lake)
 
 # saveRDS(fit, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
-fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 ```
 
 # check model fit
@@ -581,7 +581,7 @@ predictions <- left_out_scaled %>%
 
 #write_csv(predictions, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 
-predictions <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
+predictions <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 rm(fit)
 ```
 
@@ -1136,11 +1136,142 @@ lake_spec_sum %>%
 ```
 
 # lake covarites 
--lets look if there are trends for lakes above and below 0.22ppm
--group by variable where lakes are above and below 0.22ppm
-    -look at covaraites based on that split
+-lets look if there are trends for lakes where the probably of exceeding 0.22ppm is over  80%
+-summaries of average covarites for these systems
+   -this may be too much, but could then pull out a lake that is most alike the averages for a real example of a lake in that category 
 ```{r}
+lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
 
+#crosswalk for lagos id to nhdhr
+xwalk <- read_csv(file.path("D:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_link.csv"))
+glimpse(xwalk)
+
+#land use land cover data
+lagos_watershed_lulc <- read_csv(file.path("D:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lagos_watershed_lulc.csv"))
+glimpse(lagos_watershed_lulc)
+
+most_recent_landcover <- lagos_watershed_lulc %>% 
+  filter(year == 2016) %>% 
+  select(-spatial_division,
+         -year,
+         -datacoveragepct,
+         -precision) %>% 
+  rename(lagoslakeid = zoneid)
+rm(lagos_watershed_lulc)
+
+#watershed attributes data
+lagos_watershed <- read_csv(file.path("D:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_watersheds.csv"))
+glimpse(lagos_watershed)
+
+#############join lagos data#####################
+covary <- lagos_watershed %>% 
+  left_join(most_recent_landcover) %>% 
+  mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
+                                str_detect(ws_states, "WI") ~ "y",
+                                TRUE ~ "n")) %>% 
+  filter(state_keep == "y")
+rm(lagos_watershed,
+   most_recent_landcover)
+
+#lets just grab the lagos id, nhdhr, name, and coords for cross walking
+xwalk <- xwalk %>% 
+  distinct(lagoslakeid,
+         lake_nhdid,
+         lake_namegnis,
+         lake_namelagos,
+         lake_lat_decdeg,
+         lake_lon_decdeg)
+
+#grabbing cross walk information via lagos id (really interested in the nhdhr)
+covary <- covary %>% 
+  left_join(xwalk, relationship = "one-to-one")
+rm(xwalk)
+
+pred_data <- covary %>% 
+  select(lagos_id = lagoslakeid,
+         ws_focallakewaterarea_ha,
+         ws_lake_arearatio,
+         nlcd_forcon42_pct,
+         nlcd_formix43_pct,
+         nlcd_fordec41_pct,
+         nlcd_wetemerg95_pct,
+         nlcd_wetwood90_pct,
+         ws_lat_decdeg,
+         ws_lon_decdeg)
+rm(covary)
+
+#############################################################################
+
+lakes <- lake_spec_sum %>% 
+  select(-lake_lat_decdeg,
+         -lake_lon_decdeg) %>% 
+  left_join(pred_data)
+rm(lake_spec_sum)
+
+high_risk_lakes <- lakes %>% 
+  #filter for the probs over being 0.8
+  filter(prob_over >= 0.8) %>% 
+  distinct(lagos_id, species, .keep_all =  T)
+
+
+numeric_summary_by_species <- high_risk_lakes %>%
+  group_by(species) %>%
+  summarise(across(c(ws_focallakewaterarea_ha,
+         ws_lake_arearatio,
+         nlcd_forcon42_pct,
+         nlcd_formix43_pct,
+         nlcd_fordec41_pct,
+         nlcd_wetemerg95_pct,
+         nlcd_wetwood90_pct),
+                   list(mean = ~mean(.x),
+                        sd = ~sd(.x),
+                        min = ~min(.x),
+                        max = ~max(.x))))
+
+numeric_long <- numeric_summary_by_species %>%
+  pivot_longer(
+    cols = -species,
+    names_to = c("variable", "stat"),
+    names_sep = "_(?=[a-z]+$)"
+  ) %>%
+  pivot_wider(names_from = stat, values_from = value)
+
+ggplot(numeric_long, aes(x = species, y = mean, fill = species)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), width = 0.2) +
+  facet_wrap(~variable, scales = "free_y") +
+  theme_minimal() +
+  guides(fill = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    y = "Mean ± SD"
+  )
+#ggsave("risky_lakes.jpg", height = 5, width = 5, dpi = 600)
+
+ggplot(numeric_long, aes(x = variable, y = mean, fill = variable)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), width = 0.2) +
+  facet_wrap(~species, scales = "free_y") +
+  theme_minimal() +
+  guides(fill = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    y = "Mean ± SD"
+  )
 ```
 
 
@@ -1152,150 +1283,296 @@ lake_spec_sum %>%
 - cross it with a grid of lengths from each species 
 - get the length for when a species crosses 0.22 ppm in 1. lake 2.) region
 ```{r}
-length_grid <- tidyr::crossing(
-  species = c(
+#grab lake data
+#lake link
+lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
+
+#crosswalk for lagos id to nhdhr
+xwalk <- read_csv(file.path("D:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_link.csv"))
+glimpse(xwalk)
+
+#land use land cover data
+lagos_watershed_lulc <- read_csv(file.path("D:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lagos_watershed_lulc.csv"))
+glimpse(lagos_watershed_lulc)
+
+most_recent_landcover <- lagos_watershed_lulc %>% 
+  filter(year == 2016) %>% 
+  select(-spatial_division,
+         -year,
+         -datacoveragepct,
+         -precision) %>% 
+  rename(lagoslakeid = zoneid)
+rm(lagos_watershed_lulc)
+
+#watershed attributes data
+lagos_watershed <- read_csv(file.path("D:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_watersheds.csv"))
+glimpse(lagos_watershed)
+
+#############join lagos data#####################
+covary <- lagos_watershed %>% 
+  left_join(most_recent_landcover) %>% 
+  mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
+                                str_detect(ws_states, "WI") ~ "y",
+                                TRUE ~ "n")) %>% 
+  filter(state_keep == "y")
+rm(lagos_watershed,
+   most_recent_landcover)
+
+#lets just grab the lagos id, nhdhr, name, and coords for cross walking
+xwalk <- xwalk %>% 
+  distinct(lagoslakeid,
+         lake_nhdid,
+         lake_namegnis,
+         lake_namelagos,
+         lake_lat_decdeg,
+         lake_lon_decdeg)
+
+#grabbing cross walk information via lagos id (really interested in the nhdhr)
+covary <- covary %>% 
+  left_join(xwalk, relationship = "one-to-one")
+rm(xwalk)
+#############################################################################
+pred_data <- covary %>% 
+  select(lagos_id = lagoslakeid,
+         ws_focallakewaterarea_ha,
+         ws_lake_arearatio,
+         nlcd_forcon42_pct,
+         nlcd_formix43_pct,
+         nlcd_fordec41_pct,
+         nlcd_wetemerg95_pct,
+         nlcd_wetwood90_pct,
+         ws_lat_decdeg,
+         ws_lon_decdeg)
+rm(covary)
+##############################################################################
+#use scalers to put lakes in original data scale
+pred_data <- pred_data %>% 
+  filter(ws_lake_arearatio < 100) %>% 
+  filter(!is.na(ws_lake_arearatio)) %>%
+  filter(!is.na(nlcd_forcon42_pct)) %>% 
+  rename(lake_area_ha = ws_focallakewaterarea_ha,
+         watershed_lake_area_ratio = ws_lake_arearatio) %>% 
+  mutate(
+    #first, lets provide 0's in our landcover data with a very small number so they can be transfomred to logit scale
+  mutate(across(starts_with("nlcd"),
+                ~ifelse(.x ==0, 0.001, .x))) %>%
+  mutate(across(starts_with("nlcd"),
+                ~ifelse(.x ==100, 0.999, .x))) %>%  
+  #now apply logit transformations to landcover and log to others
+  mutate(logit_wetwood = car::logit(nlcd_wetwood90_pct),
+         logit_wetemerge = car::logit(nlcd_wetemerg95_pct),
+         logit_formix = car::logit(nlcd_formix43_pct),
+         logit_forcon = car::logit(nlcd_forcon42_pct),
+         logit_fordec = car::logit(nlcd_fordec41_pct),
+         log_area = log(lake_area_ha),
+         log_ws_area_ratio = log(watershed_lake_area_ratio))
+  ) %>% 
+  mutate(scaled_log_area = (log_area - lake_scalers$mean_log_area) /lake_scalers$sd_log_area,
+           
+           scaled_logit_wetwood = (logit_wetwood - lake_scalers$mean_logit_wetwood) / lake_scalers$sd_logit_wetwood,
+           
+           scaled_logit_wetemerge = (logit_wetemerge - lake_scalers$mean_logit_wetemerge) / lake_scalers$sd_logit_wetemerge,
+           
+           scaled_logit_formix = (logit_formix - lake_scalers$mean_logit_formix) / lake_scalers$sd_logit_formix,
+           
+           scaled_logit_forcon = (logit_forcon - lake_scalers$mean_logit_forcon) / lake_scalers$sd_logit_forcon,
+           
+           scaled_logit_fordec = (logit_fordec - lake_scalers$mean_logit_fordec) / lake_scalers$sd_logit_fordec,
+           
+           scaled_log_ws_area_ratio = (log_ws_area_ratio - lake_scalers$mean_lw_ratio) / lake_scalers$sd_lw_ratio)
+
+##############################################################################
+#estimate crossing by solving the equation 
+
+#first grab grab the draws from the model fit
+draws <- as_draws_df(fit)
+rm(fit)
+
+#solving for where length crosses 0.22
+threshold <- 0.22
+
+cross_length_draws <- function(draws, species, lake_row) {
+  #grab lake ids
+  lake_id <- as.character(lake_row$lagos_id)
+  
+  #items that help in reference coding and unsampled lakes
+  sp_int  <- paste0("b_species", species)
+  sp_slope <- paste0("b_scaled_length:species", species)
+  re_col  <- paste0("r_lagos_id[", lake_id, ",Intercept]")
+  
+  #species specific intercept or 0 for reference species
+  draws %>%
+    mutate(
+      # species-specific intercept
+      alpha_sp =
+        b_Intercept +
+        if (sp_int %in% colnames(draws)) .data[[sp_int]] else 0,
+      
+      #species specific slope or 0 for reference grouping
+      # species-specific slope
+      beta_sp =
+        b_scaled_length +
+        if (sp_slope %in% colnames(draws)) .data[[sp_slope]] else 0,
+      
+      #random intercept if lake exists in data or 0
+      # lake random intercept
+      alpha_lake =
+        if (re_col %in% colnames(draws)) {
+          .data[[re_col]]
+        } else {
+          0
+        },
+
+      # covariate contribution
+      cov_effect =
+        b_scaled_logit_wetwood  * lake_row$scaled_logit_wetwood +
+        b_scaled_logit_wetemerge * lake_row$scaled_logit_wetemerge +
+        b_scaled_logit_formix   * lake_row$scaled_logit_formix +
+        b_scaled_logit_forcon   * lake_row$scaled_logit_forcon +
+        b_scaled_logit_fordec   * lake_row$scaled_logit_fordec +
+        b_scaled_log_ws_area_ratio * lake_row$scaled_log_ws_area_ratio +
+        b_scaled_log_area       * lake_row$scaled_log_area,
+
+      # solve for scaled length
+      scaled_l_cross =
+        (log(threshold) - alpha_sp - alpha_lake - cov_effect) / beta_sp
+    ) %>%
+    pull(scaled_l_cross)
+}
+
+# output 
+summarise_cross <- function(scaled_l_cross) {
+  tibble(
+    l_median = median(scaled_l_cross),
+    l_lo90   = quantile(scaled_l_cross, 0.05),
+    l_hi90   = quantile(scaled_l_cross, 0.95)
+  )
+}
+
+species_list <- c(
     "walleye",
     "northern_pike",
     "black_crappie",
     "largemouth_bass",
     "bluegill",
     "white_sucker",
-    "yellow_perch"
-  ),
-  length = seq(10, 30, by = .25)
-) %>% 
-  left_join(length_scalers,by = "species") %>% 
-  mutate(scaled_length = (length - length_mean)/length_sd) %>% 
-  select(species, scaled_length)
+    "yellow_perch")
 
-pred_grid <- lake_spec_pred %>% 
-  ungroup() %>% 
-  distinct(lagos_id, 
-           species,
-           scaled_log_area,
-           scaled_log_ws_area_ratio,
-           scaled_logit_wetwood,
-           scaled_logit_wetemerge,
-           scaled_logit_formix,
-           scaled_logit_forcon,
-           scaled_logit_fordec) %>% 
-  left_join(length_grid) %>% 
-  add_epred_draws(fit, ndraws = 500, allow_new_levels = T) %>% 
-  mutate(hgppm = exp(.epred))
-rm(length_grid, fit)
+#extract results
+results <- vector(
+  "list",
+  length = nrow(pred_data) * length(species_list)
+)
 
+k <- 1
 
-#here we have 500 draw for each row because there is only one length within each lake-spec
-lake_spec_sum <- lake_spec_pred %>% 
-  #prediction in original scale
-  mutate(back_transformed = exp(.epred)) %>% 
-  group_by(lagos_id, species) %>% 
-  summarise(
-    log_hgppm = median(.epred),
-    log_lower = quantile(.epred, 0.05),
-    log_upper = quantile(.epred, 0.95),
-    hgppm = median(back_transformed),
-    lower = quantile(back_transformed, 0.05),
-    upper = quantile(back_transformed, 0.95),
-    prob_over = mean(back_transformed > 0.22),
-    .groups = "drop"
-  ) 
-rm(lake_spec_pred)
+for (i in seq_len(nrow(pred_data))) {
 
-length_threshold <- pred_grid %>% 
-  filter(hgppm >= 0.22) %>% 
+  lake_row <- pred_data[i, ]
+
+  for (sp in species_list) {
+
+    l_cross <- cross_length_draws(
+      draws   = draws,
+      species = sp,
+      lake_row = lake_row
+    )
+
+    results[[k]] <- summarise_cross(l_cross) %>%
+      mutate(
+        lagos_id = lake_row$lagos_id,
+        species  = sp
+      )
+
+    k <- k + 1
+  }
+}
+
+results <- bind_rows(results) %>% 
   left_join(length_scalers) %>% 
-  mutate(length = (scaled_length*length_sd) + length_mean) %>% 
-  group_by(lagos_id, species, .draw) %>% 
-  summarise(length_cross = min(scaled_length),
-            length_cross_in = min(length))
+   mutate(length = (l_median*length_sd) + length_mean,
+          length_lower = (l_lo90*length_sd) + length_mean,
+          length_upper = (l_hi90*length_sd) + length_mean)
+#saving results
+# write_csv(results, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
 
-threshold_summary <- length_threshold %>%
-  group_by(lagos_id, species) %>%
+results <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
+
+###########################################################################
+# connect back to lake data
+final_results <- pred_data %>% 
+  left_join(results, by = c("lagos_id")) %>% 
+  left_join(lake_link %>% 
+              select(lagos_id = lagoslakeid,
+                     lake_lat_decdeg,
+                     lake_lon_decdeg), by = c("lagos_id"))
+rm(results)
+###########################################################################
+#average median length across lakes - think about how to deal with lake level vary
+in_sample_lake_spec <- hg.data.loo.mw %>% 
+  mutate(in_sample_check = paste0(lagos_id,species)) %>% 
+  distinct(in_sample_check)
+
+final_results %>%
+  mutate(in_sample_check = paste0(lagos_id,species)) %>% 
+  mutate(in_sample = case_when(in_sample_check %in% in_sample_lake_spec$in_sample_check ~ "y",
+                               TRUE ~ "n")) %>% 
+  group_by(in_sample, species) %>% 
   summarise(
-    median_length = median(length_cross_in),
-    lower_90 = quantile(length_cross_in, 0.05),
-    upper_90 = quantile(length_cross_in, 0.95),
-    .groups = "drop"
-  ) 
+    min = min(length),
+    mean = mean(length),
+    max = max(length),
+    n())
+#in sample means that lake-species was used in training
 
-pred_grid <-  pred_grid %>% 
-  left_join(length_scalers) %>% 
-  mutate(length = (scaled_length*length_sd) + length_mean) 
+final_results %>%
+  mutate(in_sample_check = paste0(lagos_id,species)) %>% 
+  mutate(in_sample = case_when(in_sample_check %in% in_sample_lake_spec$in_sample_check ~ "y",
+                               TRUE ~ "n")) %>%
+  ggplot() +
+  geom_density(aes(length, fill = in_sample), alpha = .5) +
+  facet_wrap(~species)
+#interesting the smallest length (-7.62) was from bone lake in Minnesota, only 1 sample of white sucker which was SUPER high, shifting the random effect, thus we see pike heavily influenced
+#the in sample pike was from Ryan lake in MN St. Louis county with super high measured mercury
 
-pred_summary <- pred_grid %>% 
-  group_by(lagos_id, species, length) %>% 
-  summarise(
-    hg_median = median(hgppm),
-    hg_lower  = quantile(hgppm, 0.05),
-    hg_upper  = quantile(hgppm, 0.95),
-    .groups = "drop"
-  ) %>% 
-   mutate(ci_width = hg_upper - hg_lower) %>% 
-  filter(!(species == "yellow_perch" & length > 20)) %>% 
-  filter(!(species == "black_crappie" & length > 23)) %>% 
-  filter(!(species == "largemouth_bass" & length > 20)) %>% 
-  filter(!(species == "white_sucker" & length < 20))
+##########################################################################
+lake_sf <- final_results %>%
+  st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326)
 
-ggplot(pred_summary %>% 
-         filter(lagos_id == "996") %>% 
-         mutate(lagos_id_words = case_when(lagos_id == 996 ~ "Leech",
-                                     TRUE ~ NA)),
-       aes(x = length, y = hg_median)) +
-  geom_ribbon(
-    aes(ymin = hg_lower, ymax = hg_upper),
-    alpha = 0.25
-  ) +
-  geom_line(linewidth = 1) +
-  geom_hline(
-    yintercept = 0.22,
-    linetype = "dashed",
-    color = "red"
-  ) +
-  facet_wrap(lagos_id_words ~ species, scales = "free") +
-  theme_minimal()
+states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+  filter(ID %in% c("minnesota", "wisconsin"))
 
-ggplot(
-  pred_summary %>%  filter(lagos_id == "996") %>% 
-         mutate(lagos_id_words = case_when(lagos_id == 996 ~ "Leech",
-                                     TRUE ~ NA)) %>% 
-    filter(species %in% c("northern_pike", "walleye", "black_crappie")),
-  aes(x = length, y = hg_median)
-) +
-  geom_ribbon(
-    aes(ymin = hg_lower, ymax = hg_upper),
-    alpha = 0.25
+
+ggplot() +
+  geom_sf(data = states, fill = "white", color = "black") +
+  geom_sf(
+    data = lake_sf,
+    aes(
+      color = length,
+      alpha = .5
+    )
   ) +
-  geom_line(linewidth = 1) +
-  geom_hline(
-    yintercept = 0.22,
-    linetype = "dashed",
-    color = "red"
-  ) +
-  geom_vline(
-    data = threshold_summary %>% filter(lagos_id == "996") %>% 
-      filter(species %in% c("northern_pike", "walleye", "black_crappie")),
-    aes(xintercept = median_length),
-    linewidth = 0.8,
-    linetype = "dashed",
-    inherit.aes = FALSE
-  ) +
-  geom_vline(
-    data = threshold_summary %>% filter(lagos_id == "996") %>% 
-      filter(species %in% c("northern_pike", "walleye", "black_crappie")),
-    aes(xintercept = lower_90),
-    linewidth = 0.8,
-    inherit.aes = FALSE
-  ) +
-  geom_vline(
-    data = threshold_summary %>% filter(lagos_id == "996") %>% 
-      filter(species %in% c("northern_pike", "walleye", "black_crappie")),
-    aes(xintercept = upper_90),
-    linewidth = 0.8,
-    inherit.aes = FALSE
-  ) +
-  facet_wrap(lagos_id_words ~ species) +
-  theme_minimal()
+  facet_wrap(~ species) +
+  scale_color_viridis_c(option = "plasma",
+                        name = "Length (inches)") +
+  theme_minimal() +
+  theme(legend.position = c(.65, .01),
+        axis.text.x = element_text(angle = 30, hjust = 1))
+#ggsave("length_threshold_map.jpg", height = 5, width = 5, dpi = 600)
 ```
 
 
@@ -1458,5 +1735,151 @@ predictions_summary_original <- left_out_scaled %>%
   distinct(lagos_id, species, hg_ppm, length_in, species, .keep_all = T) %>% 
   left_join(predictions_summary_original, by = c("lagos_id", "hg_ppm", "length_in", "species"))
 ########################################################################
+#old code using grid of lengths to find the crossing point
+
+#generate length data we want
+length_grid <- tidyr::crossing(
+  species = c(
+    "walleye",
+    "northern_pike",
+    "black_crappie",
+    "largemouth_bass",
+    "bluegill",
+    "white_sucker",
+    "yellow_perch"
+  ),
+  length = seq(10, 30, by = .25)
+) %>% 
+  left_join(length_scalers,by = "species") %>% 
+  mutate(scaled_length = (length - length_mean)/length_sd) %>% 
+  select(species, scaled_length)
+
+#cross the datasets
+pred_full <- crossing(pred_data, pred_spec)
+rm(pred_data, pred_spec)
+#############################################################################
+fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+
+#predicting at the lake-spec level 
+#####here we can change the number of draws###########
+lake_spec_pred <- pred_full %>% 
+  add_epred_draws(fit, ndraws = 500, allow_new_levels = TRUE) %>% 
+  mutate(hgppm = exp(.epred))
+rm(fit, pred_full)
+
+
+#here we have 500 draw for each row because there is only one length within each lake-spec
+lake_spec_sum <- lake_spec_pred %>% 
+  #prediction in original scale
+  mutate(back_transformed = exp(.epred)) %>% 
+  group_by(lagos_id, species) %>% 
+  summarise(
+    log_hgppm = median(.epred),
+    log_lower = quantile(.epred, 0.05),
+    log_upper = quantile(.epred, 0.95),
+    hgppm = median(back_transformed),
+    lower = quantile(back_transformed, 0.05),
+    upper = quantile(back_transformed, 0.95),
+    prob_over = mean(back_transformed > 0.22),
+    .groups = "drop"
+  ) 
+rm(lake_spec_pred)
+
+length_threshold <- pred_grid %>% 
+  filter(hgppm >= 0.22) %>% 
+  left_join(length_scalers) %>% 
+  mutate(length = (scaled_length*length_sd) + length_mean) %>% 
+  group_by(lagos_id, species, .draw) %>% 
+  summarise(length_cross = min(scaled_length),
+            length_cross_in = min(length))
+
+threshold_summary <- length_threshold %>%
+  group_by(lagos_id, species) %>%
+  summarise(
+    median_length = median(length_cross_in),
+    lower_90 = quantile(length_cross_in, 0.05),
+    upper_90 = quantile(length_cross_in, 0.95),
+    .groups = "drop"
+  ) 
+
+pred_grid <-  pred_grid %>% 
+  left_join(length_scalers) %>% 
+  mutate(length = (scaled_length*length_sd) + length_mean) 
+
+pred_summary <- pred_grid %>% 
+  group_by(lagos_id, species, length) %>% 
+  summarise(
+    hg_median = median(hgppm),
+    hg_lower  = quantile(hgppm, 0.05),
+    hg_upper  = quantile(hgppm, 0.95),
+    .groups = "drop"
+  ) %>% 
+   mutate(ci_width = hg_upper - hg_lower) %>% 
+  filter(!(species == "yellow_perch" & length > 20)) %>% 
+  filter(!(species == "black_crappie" & length > 23)) %>% 
+  filter(!(species == "largemouth_bass" & length > 20)) %>% 
+  filter(!(species == "white_sucker" & length < 20))
+
+ggplot(pred_summary %>% 
+         filter(lagos_id == "996") %>% 
+         mutate(lagos_id_words = case_when(lagos_id == 996 ~ "Leech",
+                                     TRUE ~ NA)),
+       aes(x = length, y = hg_median)) +
+  geom_ribbon(
+    aes(ymin = hg_lower, ymax = hg_upper),
+    alpha = 0.25
+  ) +
+  geom_line(linewidth = 1) +
+  geom_hline(
+    yintercept = 0.22,
+    linetype = "dashed",
+    color = "red"
+  ) +
+  facet_wrap(lagos_id_words ~ species, scales = "free") +
+  theme_minimal()
+
+ggplot(
+  pred_summary %>%  filter(lagos_id == "996") %>% 
+         mutate(lagos_id_words = case_when(lagos_id == 996 ~ "Leech",
+                                     TRUE ~ NA)) %>% 
+    filter(species %in% c("northern_pike", "walleye", "black_crappie")),
+  aes(x = length, y = hg_median)
+) +
+  geom_ribbon(
+    aes(ymin = hg_lower, ymax = hg_upper),
+    alpha = 0.25
+  ) +
+  geom_line(linewidth = 1) +
+  geom_hline(
+    yintercept = 0.22,
+    linetype = "dashed",
+    color = "red"
+  ) +
+  geom_vline(
+    data = threshold_summary %>% filter(lagos_id == "996") %>% 
+      filter(species %in% c("northern_pike", "walleye", "black_crappie")),
+    aes(xintercept = median_length),
+    linewidth = 0.8,
+    linetype = "dashed",
+    inherit.aes = FALSE
+  ) +
+  geom_vline(
+    data = threshold_summary %>% filter(lagos_id == "996") %>% 
+      filter(species %in% c("northern_pike", "walleye", "black_crappie")),
+    aes(xintercept = lower_90),
+    linewidth = 0.8,
+    inherit.aes = FALSE
+  ) +
+  geom_vline(
+    data = threshold_summary %>% filter(lagos_id == "996") %>% 
+      filter(species %in% c("northern_pike", "walleye", "black_crappie")),
+    aes(xintercept = upper_90),
+    linewidth = 0.8,
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(lagos_id_words ~ species) +
+  theme_minimal()
+###############################################################################
+
 ```
 
