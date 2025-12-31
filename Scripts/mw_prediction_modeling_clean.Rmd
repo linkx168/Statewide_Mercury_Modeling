@@ -544,6 +544,12 @@ rm(train_lakes, train_species_by_lake)
 
 # fit model
 ```{r}
+#set priors for intercept and variance terms
+#fixed effects priors for brms models are well documented 
+# priors <- c(prior(normal(1,100), class = Intercept),
+#             prior(student_t(3, 0, 2.5), class = sd),
+#             prior(student_t(3,0,2.5), class = sigma))
+
 # fit <- brm(log_hgppm ~
 #                  scaled_length*species +
 #                  species +
