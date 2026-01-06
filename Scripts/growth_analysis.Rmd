@@ -24,9 +24,10 @@ library(rnaturalearthdata)
 -growth data from MN
 -zm and ssw lakes from mn infested waters list
 ```{r}
-mn_data <- open_dataset(sources = file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Fish Survey Data", "Parquet files", "Age-assigned Data", "mn_halk_aged_data", "most_common_structures", "part-0.parquet"))
+mn_data <- open_dataset(sources = file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Fish Survey Data", "manuscript_products", "ScienceBase", "midwest_hive"), partitioning = "state") %>% 
+  filter(state == "Minnesota" & !is.na(est_age))
 
-zm_ssw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "zm_ssw_2025.csv")) %>% 
+zm_ssw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "zm_ssw_2025.csv")) %>% 
   filter(!is.na(dow) & !(str_detect(dow, "n"))) %>% 
   mutate(original_id = dow) %>% 
   mutate(dow = str_replace_all(dow, pattern = "-", ""),
@@ -36,8 +37,8 @@ zm_ssw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJ
                          TRUE ~ dow),
          dow = case_when(str_starts(dow, "0") ~ str_sub(dow, 2),
                          TRUE ~ dow))  %>% 
-  rename(lake.id = dow) %>% 
-  pivot_wider(id_cols = c(lake.id, lake_name),
+  rename(lake_id = dow) %>% 
+  pivot_wider(id_cols = c(lake_id, lake_name),
               names_from = ais,
               values_from = year_infested,
               values_fn = min) %>% 
@@ -45,12 +46,11 @@ zm_ssw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJ
          ssw = `starry stonewort`)
 
 #crosswalk
-xwalk <- open_dataset(sources = file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Fish Survey Data", "Parquet files", "hive_update"), partitioning = c("state")) %>% 
+xwalk <- open_dataset(sources = file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Fish Survey Data", "Parquet files", "hive_update"), partitioning = c("state")) %>% 
   filter(state == "Minnesota") %>% 
   filter(!is.na(latitude_lake_centroid) & !is.na(lake_id)) %>% 
   distinct(lake_id, latitude_lake_centroid, longitude_lake_centroid) %>% 
-  collect() %>% 
-  rename(lake.id = lake_id)
+  collect() 
 ```
 
 # Exploring growth data
@@ -58,21 +58,21 @@ xwalk <- open_dataset(sources = file.path("G:", "Shared drives", "Hansen Lab", "
 #how many lakes do we have for each species at the year level?
 mn_data %>% 
   filter(alk == "year") %>% 
-  group_by(species) %>% 
-  summarise(n_lakes = n_distinct(lake.id)) %>% 
+  group_by(species_1) %>% 
+  summarise(n_lakes = n_distinct(lake_id)) %>% 
   collect()
 
 #how many lakes with lake-year data do we have for each invasive?
 mn_data %>% 
   filter(alk == "year") %>% 
-  left_join(zm_ssw, by = "lake.id") %>% 
-  group_by(lake.id) %>% 
+  left_join(zm_ssw, by = "lake_id") %>% 
+  group_by(lake_id) %>% 
   mutate(ais = case_when(!is.na(zm) & is.na(ssw) ~ "zm",
                          !is.na(ssw) & is.na(zm) ~ "ssw",
                          !is.na(ssw) & !is.na(zm) ~ "both",
                          is.na(ssw) & is.na(zm) ~ "none")) %>% 
   ungroup() %>% 
-  distinct(lake.id, ais) %>% 
+  distinct(lake_id, ais) %>% 
   group_by(ais) %>% 
   count() %>% 
   collect()
@@ -80,8 +80,8 @@ mn_data %>%
 #what is the general sense for species?
 check <- mn_data %>% 
   filter(alk == "year") %>% 
-  left_join(zm_ssw, by = "lake.id") %>% 
-  group_by(lake.id, species) %>% 
+  left_join(zm_ssw, by = "lake_id") %>% 
+  group_by(lake_id, species_1) %>% 
   mutate(ais = case_when(!is.na(zm) & is.na(ssw) ~ "zm",
                          !is.na(ssw) & is.na(zm) ~ "ssw",
                          !is.na(ssw) & !is.na(zm) ~ "both",
@@ -93,12 +93,12 @@ check <- mn_data %>%
                                 year < ssw ~ "after",
                                 TRUE ~ "NA")) %>% 
   ungroup() %>% 
-  distinct(lake.id, ais, species, impact_zm, impact_ssw) %>% 
+  distinct(lake_id, ais, species_1, impact_zm, impact_ssw) %>% 
   collect()
 glimpse(check)
 
 zm_summary <- check %>%
-  group_by(lake.id, species) %>%
+  group_by(lake_id, species_1) %>%
   summarise(
     zm_before = any(impact_zm == "before"),
     zm_after  = any(impact_zm == "after"),
@@ -122,24 +122,24 @@ zm_summary <- check %>%
   )
 
 zm_counts <- zm_summary %>%
-  group_by(species) %>% 
+  group_by(species_1) %>% 
   count(zm_status, ssw_status) %>% 
   pivot_longer(cols = c(zm_status, ssw_status),names_to = "ais",values_to = "timing") %>% 
-  group_by(species, ais, timing) %>% 
+  group_by(species_1, ais, timing) %>% 
   summarise(n = sum(n))
 
 zm_counts %>% 
   filter(timing != "neither") %>% 
   ggplot() +
   geom_col(aes(timing, n)) +
-  facet_grid(species~ais)
+  facet_grid(species_1~ais)
 
 zm_counts %>% 
   filter(timing != "neither") %>% 
   #filter(ais == "zm_status") %>% 
   ggplot() +
   geom_col(aes(timing, n)) +
-  facet_grid(ais~species)
+  facet_grid(ais~species_1)
 
 #how many starry stonwart lakes do we have pre and post?
 zm_counts %>% 
@@ -148,7 +148,7 @@ zm_counts %>%
 ssw_lakes <- check %>% 
   filter(ais %in% c("ssw", "both")) %>% 
   select(-impact_zm, -ais) %>% 
-  distinct(lake.id, species, impact_ssw) %>% 
+  distinct(lake_id, species_1, impact_ssw) %>% 
   mutate(indicator = 1) %>% 
   pivot_wider(names_from = impact_ssw,
               values_from = indicator)
@@ -157,52 +157,52 @@ glimpse(ssw_lakes)
 ssw_lakes_both <- ssw_lakes %>% 
   filter(before == "1" & after == "1") %>% 
   select(-after, -before) %>% 
-  group_by(lake.id) %>% 
-  summarise(species = list(species), .groups = "drop") %>% 
-  mutate(species = sapply(species, toString))
+  group_by(lake_id) %>% 
+  summarise(species_1 = list(species_1), .groups = "drop") %>% 
+  mutate(species_1 = sapply(species_1, toString))
   
 
 ###years of data?
 years <- mn_data %>% 
   filter(alk == "year") %>% 
-  left_join(zm_ssw, by = "lake.id") %>% 
-  group_by(lake.id, species, year) %>% 
+  left_join(zm_ssw, by = "lake_id") %>% 
+  group_by(lake_id, species_1, year) %>% 
   mutate(ais = case_when(!is.na(zm) & is.na(ssw) ~ "Zebra Mussel",
                          !is.na(ssw) & is.na(zm) ~ "Starry Stonewort",
                          !is.na(ssw) & !is.na(zm) ~ "ZM and SSW",
                          is.na(ssw) & is.na(zm) ~ "Uninvaded")) %>% 
-  distinct(lake.id, ais, species, year) %>% 
+  distinct(lake_id, ais, species_1, year) %>% 
   collect()
 
 years %>% 
-  group_by(species, lake.id, ais) %>% 
+  group_by(species_1, lake_id, ais) %>% 
   count() %>% 
   ggplot() +
   geom_histogram(aes(n)) +
   labs(x = "# of years with halk at lake-year level",
        y = "# of lakes") +
-  facet_grid(species~ais, scales = "free")
+  facet_grid(species_1~ais, scales = "free")
 ```
 
 # Map 
 ```{r}
 lake_species <- mn_data %>% 
   filter(alk == "year") %>% 
-  left_join(zm_ssw, by = "lake.id") %>% 
+  left_join(zm_ssw, by = "lake_id") %>% 
   select(-ssw) %>% 
-  group_by(lake.id, species) %>% 
+  group_by(lake_id, species_1) %>% 
   mutate(ais = case_when(!is.na(zm) ~ "zm",
                          is.na(zm) ~ "uninvaded"),
          impact_zm = case_when(year >= zm ~ "before",
                                year < zm ~ "after",
                                TRUE ~ "NA")) %>% 
   ungroup() %>% 
-  distinct(lake.id, ais, species, impact_zm) %>% 
+  distinct(lake_id, ais, species_1, impact_zm) %>% 
   collect() %>% 
-  pivot_wider(id_cols = c(lake.id, species, ais), values_from = impact_zm,names_from = impact_zm) %>% 
+  pivot_wider(id_cols = c(lake_id, species_1, ais), values_from = impact_zm,names_from = impact_zm) %>% 
   #zm_ssw has two a record for both zm and ssw for these lakes - leading an erroneous uninvaded row
-  filter(!(lake.id == "18031100" & ais == "uninvaded") &
-           !(lake.id == "4007900" & ais == "uninvaded")) %>% 
+  filter(!(lake_id == "18031100" & ais == "uninvaded") &
+           !(lake_id == "4007900" & ais == "uninvaded")) %>% 
   mutate(timing = case_when(ais == "uninvaded" ~ "y",
                             ais == "zm" & !is.na(after) & !is.na(before) ~ "y",
                             TRUE ~ "n")) %>% 
@@ -212,10 +212,10 @@ lake_species <- mn_data %>%
 lake_species <- lake_species %>% 
   left_join(xwalk) %>% 
   filter(!is.na(latitude_lake_centroid)) %>% 
-  select(lake.id, species, ais, latitude_lake_centroid, longitude_lake_centroid)
+  select(lake_id, species_1, ais, latitude_lake_centroid, longitude_lake_centroid)
 
 lake_sf <- lake_species %>%
-  distinct(lake.id, species, ais, latitude_lake_centroid, longitude_lake_centroid) %>%
+  distinct(lake_id, species_1, ais, latitude_lake_centroid, longitude_lake_centroid) %>%
   st_as_sf(coords = c("longitude_lake_centroid", "latitude_lake_centroid"), crs = 4326)
 
 us_states <- ne_states(country = "United States of America", returnclass = "sf")
@@ -229,7 +229,7 @@ ggplot() +
   geom_sf(data = mn_border, fill = NA, color = "black") +
   geom_sf(data = lake_uninvaded, color = "lightblue", alpha = 0.6, size = 2) +
   geom_sf(data = lake_zm, color = "salmon", alpha = 0.9, size = 2.5) +
-  facet_wrap(~ species) +
+  facet_wrap(~ species_1) +
   theme_minimal() +
   labs(color = "Invasion") +
   coord_sf(xlim = st_bbox(mn_border)[c("xmin", "xmax")],
@@ -239,14 +239,14 @@ ggplot() +
 lake_species_sub <- lake_species %>% 
   left_join(xwalk) %>% 
   filter(!is.na(latitude_lake_centroid)) %>% 
-  select(lake.id, species, ais, latitude_lake_centroid, longitude_lake_centroid) %>% 
-  filter(species %in% c("walleye", "northern_pike", "bluegill")) %>% 
-  mutate(species_clean = case_when(species == "walleye" ~ "Walleye",
-                                   species == "northern_pike" ~ "Northern Pike",
-                                   species == "bluegill" ~ "Bluegill"))
+  select(lake_id, species_1, ais, latitude_lake_centroid, longitude_lake_centroid) %>% 
+  filter(species_1 %in% c("walleye", "northern_pike", "bluegill")) %>% 
+  mutate(species_clean = case_when(species_1 == "walleye" ~ "Walleye",
+                                   species_1 == "northern_pike" ~ "Northern Pike",
+                                   species_1 == "bluegill" ~ "Bluegill"))
 
 lake_sf <- lake_species_sub %>%
-  distinct(lake.id, species_clean, ais, latitude_lake_centroid, longitude_lake_centroid) %>%
+  distinct(lake_id, species_clean, ais, latitude_lake_centroid, longitude_lake_centroid) %>%
   st_as_sf(coords = c("longitude_lake_centroid", "latitude_lake_centroid"), crs = 4326)
 
 lake_uninvaded <- lake_sf %>% filter(ais == "uninvaded")
@@ -295,3 +295,204 @@ zm_age_data %>%
   facet_wrap(~species, scales = "free")
 ```
 
+# 2025 continuation lake selection exploration 
+1. Count of lakes across the state with zm, ssw, or both?
+2. Prior hg data?
+3. Do we know anything about its abundance?
+```{r}
+# lakes listed as infested with zebra mussels or starry in 2025
+zm_ssw <- read_csv("Data/zm_ssw_2025.csv") %>% 
+  filter(!is.na(dow)) %>% 
+  filter(!(dow %in% c("na", "none"))) %>% 
+  distinct() %>% 
+  mutate(dow = case_when(str_detect(dow, "04-0063") ~ "04-0063",
+                         TRUE ~ dow))
+
+#mercury data
+hg <- read_csv("Data/allfish_data_04042024_JLO.csv") 
+
+
+########################clean data #############################################
+#fix invasion data
+clean_lake_ids <- function(id) {
+  if (is.na(id) || id == "") return(NA_character_)  # Handle NA or empty values
+  
+  id_clean <- as.character(id)  # Ensure it's a character string
+  id_clean <- str_replace_all(id_clean, "-", "")  # Remove dashes
+  
+  # Ensure it has a leading zero if it originally had one
+  if (nchar(id_clean) < 6) {
+    id_clean <- str_pad(id_clean, width = 6, pad = "0", side = "left")
+  }
+  
+  # Ensure it's 8 digits long
+  if (nchar(id_clean) == 6) {
+    id_clean <- paste0(id_clean, "00")  # Append "00" if only 6 digits long
+  }
+  
+  return(id_clean)
+}
+
+#apply cleaning to data
+zm_ssw <- zm_ssw %>% 
+  mutate(dow = sapply(dow, clean_lake_ids))
+rm(clean_lake_ids)
+
+#pivot so we have one lake per row, two columns for invasive species (one for zm and one for starry)
+zm_ssw <- zm_ssw %>% 
+  select(dow, ais, year_infested) %>% 
+  pivot_wider(names_from = ais,
+              values_from = year_infested) %>% 
+  rename(zm_year_infested = `zebra mussel`,
+         ssw_year_infested = `starry stonewort`)
+
+#clean hg data now
+clean_dowid <- function(id) {
+  if (is.na(id) || id == "") return(NA_character_)  # Handle NA values
+  id_clean <- str_replace_all(id, "-", "")  # Remove dashes
+  return(id_clean)
+}
+
+hg <- hg %>% 
+  mutate(dow = map_chr(DOWID, clean_dowid)) %>% 
+  mutate(dow = case_when(dow == "56074701" | dow == "56074702" ~ "56074700",
+                         dow == "73020000" | dow == "73020002" ~ "73020000",
+                         TRUE ~ dow)) 
+rm(clean_dowid)
+
+# looking at lakes across the state with zm and ssw
+############### across state exploration ################################
+zm_ssw_lakes <- zm_ssw %>% 
+  filter(!is.na(dow)) %>%
+  filter(dow != "21021200")
+
+zm_ssw_lakes %>% 
+  summarise(zm_only = sum(!is.na(zm_year_infested) & is.na(ssw_year_infested)),
+            ssw_only = sum(is.na(zm_year_infested) & !is.na(ssw_year_infested)),
+            zm_and_ssw = sum(!is.na(zm_year_infested) & !is.na(ssw_year_infested)))
+
+#only starry lakes
+zm_ssw_lakes %>% 
+  left_join(hg %>% 
+              distinct(dow, WATERWAY), by = "dow") %>% 
+  filter(is.na(zm_year_infested) & !is.na(ssw_year_infested))
+#upper red, wolf, and rush DO have zm but they list zm with a different dow in list
+# for example Upper red is listed wtih 04003500 for zm but 04003501 for ssw
+# north twin (04006300) does not have starry listed on lake finder
+# Bowen shows both zm and starry on lake finder
+
+# both
+zm_ssw_lakes %>% 
+  left_join(hg %>% 
+              distinct(dow, WATERWAY), by = "dow") %>% 
+  filter(!is.na(zm_year_infested) & !is.na(ssw_year_infested)) %>% 
+  print(n = nrow(.))
+
+
+###############lets look at the lakes we studied prior######################
+#getting study lakes
+study_dows <- c(49007900, 47004901, 3057600, 29018500, 1006200, 21014500, 86025200,
+          34007900, 11030500, 11035800, 3015300, 73020000, 11016700, 3047500,
+          56074700, 18030800, 49012700, 11050400, 56061300, 47004600, 11020300, 04003000, 11014700, 86009000)
+study_dows <- str_pad(as.character(study_dows), width = 8, side = "left", pad = "0")
+study_dows <- tibble(dow = study_dows)
+
+#join study lakes to invasion data
+study_comb <- study_dows %>% 
+  left_join(zm_ssw, by = "dow")
+
+#join study lake info to mercury data
+study_hg <- hg %>% 
+  right_join(study_comb, "dow")
+
+# summary of hg data from the state for our study lakes
+study_hg %>% 
+  group_by(dow, WATERWAY, SPEC) %>%
+  summarise(n_hg = sum(!is.na(HGPPM))) %>% 
+  pivot_wider(id_cols = c("dow", "WATERWAY",),names_from = SPEC,values_from = n_hg) %>% 
+  select(NOP, WAE, BLC, BLG, YEP, WTS, SMB, LMB) %>% 
+  print(n = nrow(.))
+
+study_comb %>% 
+  left_join(hg %>% 
+              select(dow, WATERWAY), by = "dow") %>% 
+  mutate(invasion = case_when(!is.na(zm_year_infested) & is.na(ssw_year_infested) ~ "zm_only",
+                              is.na(zm_year_infested) & !is.na(ssw_year_infested) ~ "ssw_only",
+                              TRUE ~ "both")) %>% 
+  distinct(dow, WATERWAY, invasion) %>% 
+  arrange(invasion) %>% 
+  print(n = nrow(.))
+
+#how many samples pre/post invasion?
+#first zm
+study_hg %>% 
+  filter(!is.na(zm_year_infested)) %>%
+  filter(SPEC %in% c("NOP", "WAE")) %>% 
+  group_by(dow, WATERWAY, SPEC, zm_year_infested) %>%
+  summarise(n_hg_pre = sum(YEARCOLL < zm_year_infested),
+            n_hg_post = sum(YEARCOLL >= zm_year_infested)) %>% 
+  pivot_wider(id_cols = c("dow", "WATERWAY", "zm_year_infested"),names_from = SPEC,values_from = c("n_hg_pre", "n_hg_post")) %>% 
+  relocate(n_hg_post_NOP, .after = n_hg_pre_NOP) %>% 
+  print(n = nrow(.)) 
+
+#now ssw
+study_hg %>% 
+  filter(!is.na(ssw_year_infested)) %>%
+  filter(SPEC %in% c("NOP", "WAE")) %>% 
+  group_by(dow, WATERWAY, SPEC, ssw_year_infested) %>%
+  summarise(n_hg_pre = sum(YEARCOLL < ssw_year_infested),
+            n_hg_post = sum(YEARCOLL >= ssw_year_infested)) %>% 
+  pivot_wider(id_cols = c("dow", "WATERWAY", "ssw_year_infested"),names_from = SPEC,values_from = c("n_hg_pre", "n_hg_post")) %>% 
+  relocate(n_hg_post_NOP, .after = n_hg_pre_NOP) %>% 
+  print(n = nrow(.)) 
+
+# Big Cormorant? - quite a few samples but spread across species 
+study_hg %>% 
+  filter(dow %in% c("03057600", "11014700", "34007900", "86025200")) %>% 
+  filter(SPEC %in% c("WAE", "NOP")) %>% 
+  mutate(zm = case_when(YEARCOLL < zm_year_infested ~ "pre",
+                        YEARCOLL >= zm_year_infested ~ "post")) %>% 
+  ggplot() +
+  geom_point(aes(LGTHIN, HGPPM, color = zm)) +
+  geom_smooth(aes(LGTHIN, HGPPM, color = zm)) +
+  facet_grid(WATERWAY~SPEC)
+
+
+###############combine invasion and hg data####################################
+#zm and starry lake hg
+zm_ssw_hg <- zm_ssw %>% 
+  inner_join(hg)
+
+#quick summary of ais lakes with mercury data
+ais_lakes <- zm_ssw_hg %>% 
+  distinct(dow, YEARCOLL, SPEC, zm_year_infested, ssw_year_infested) %>% 
+  mutate(pre_ssw = case_when(YEARCOLL < ssw_year_infested ~ "y",
+                             TRUE ~ "n"),
+         post_ssw = case_when(YEARCOLL > ssw_year_infested ~ "y",
+                             TRUE ~ "n"),
+         pre_zm = case_when(YEARCOLL < zm_year_infested ~ "y",
+                             TRUE ~ "n"),
+         post_zm = case_when(YEARCOLL > zm_year_infested ~ "y",
+                             TRUE ~ "n"))
+#write_csv(ais_lakes, "dnr_hg_invasion.csv")
+
+#how many for wae and nop?
+ais_lakes <- zm_ssw_hg %>% 
+  select(dow, YEARCOLL, SPEC, zm_year_infested, ssw_year_infested) %>% 
+  filter(SPEC %in% c("WAE", "NOP")) %>% 
+  group_by(dow, SPEC) %>% 
+  summarise(pre_ssw = sum(YEARCOLL < ssw_year_infested),
+         post_ssw = sum(YEARCOLL > ssw_year_infested),
+         pre_zm = sum(YEARCOLL < zm_year_infested),
+         post_zm = sum(YEARCOLL > zm_year_infested)) %>% 
+  pivot_wider(id_cols = c("dow"),names_from = "SPEC",values_from = c("pre_ssw", "post_ssw", "pre_zm", "post_zm")) %>% 
+  select(dow,
+         pre_ssw_NOP,
+         post_ssw_NOP,
+         pre_ssw_WAE,
+         post_ssw_WAE,
+         pre_zm_NOP,
+         post_zm_NOP,
+         everything())
+
+```
