@@ -12,6 +12,7 @@ editor_options:
 library(tidyverse)
 library(mwlaxeref)
 library(mnsentinellakes)
+library(janitor)
 ```
 
 # Data
@@ -19,7 +20,7 @@ library(mnsentinellakes)
 #mercury
 mn_dnr <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv"))
 
-glifwc <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg.csv"))
+glifwc <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "glifwc_hg_new.csv"))
 
 wi_hg <- read_csv(file.path("G:", 
                              "Shared drives", 
@@ -35,8 +36,43 @@ wi_hg <- read_csv(file.path("G:",
 # standardize glifwc data
 ```{r}
 glifwc_merge <- glifwc %>% 
-  #for the sake of ease I'm going to assume all mn and WI samples are duplicates and throw them out
-  filter(!(state %in% c("MN", "WI")))
+  clean_names() %>% 
+  filter(!(is.na(length_inches) | is.na(`hg_ppm`))) %>% 
+  mutate(state = case_when(state == "MI" ~ "Michigan",
+                           state == "WI" ~ "Wisconsin",
+                           state == "MN" ~ "Minnesota",
+                           TRUE ~ NA),
+         spp_code = tolower(species),
+         spp_code = str_replace(pattern = " ",replacement = "_", species),
+         sample_date = mdy(date)) %>% 
+  #lets assume all samples in MN are duplicates 
+  filter(state != "Minnesota") %>% 
+  rename(state_id = wbic,
+         length_in = length_inches) %>% 
+  #add nhdhr and lagos ids
+  local_to_nhdhr(from_colname = "state_id", states = c("wi", "mi")) %>% 
+  local_to_lagos(from_colname = "state_id", states = c("wi", "mi"))  %>% 
+  select(state,
+         county,
+         state_id,
+         waterbody,
+         lagoslakeid = lagos.id,
+         year,
+         sample_date,
+         spp_code,
+         length_in,
+         hg_ppm,
+         sex,
+         age,
+         wt_lbs)
+glimpse(glifwc_merge)
+
+glifwc_merge %>% 
+  distinct(state,state_id, lagoslakeid) %>% 
+  group_by(state) %>% 
+  summarise(n_na = sum(is.na(lagoslakeid)),
+            n = n_distinct(state_id))
+#alright, this is actually pretty soild 
 ```
 
 # standardize mn data
@@ -71,7 +107,8 @@ mn_dnr_merge <- mn_dnr %>%
          hg_code = HGCODE,
          hg_lab = HGLAB,
          hg_notes = HGCMMT,
-         lagoslakeid = lagos.id) %>% 
+         lagoslakeid = lagos.id
+         ) %>% 
   mutate(state = "MN",
          county = NA,
          sample_date = mdy(DATECOL2)) %>% 
@@ -79,7 +116,6 @@ mn_dnr_merge <- mn_dnr %>%
          county,
          waterbody,
          state_id,
-         lagoslakeid,
          nhdhr.id,
          lagoslakeid,
          sample_date,
@@ -99,6 +135,11 @@ mn_dnr_merge <- mn_dnr %>%
 
 # standarize wi data
 ```{r}
+wi_hg %>% 
+  group_by(collector) %>% 
+  count() %>% 
+  print(n = nrow(.))
+
 wi_hg_merge <- wi_hg %>% 
   mutate(state = "WI", 
          waterbody = primary_site,
@@ -139,7 +180,8 @@ wi_hg_merge <- wi_hg %>%
          hg_ppm,
          hg_code,
          hg_lab,
-         hg_notes)
+         hg_notes,
+         collector)
 
 #now lets drop any non-lakes
 wi_hydro_list <- read_csv("G:/Shared drives/Hansen Lab/RESEARCH PROJECTS/Fish Survey Data/WI_Data/WI_Rivers_Info/24k_Hydro_Waterbodies_(Open_Water).csv")
@@ -189,6 +231,72 @@ wi_hg_merge <- wi_hg_merge %>%
 rm(wi_hydro_list)
 ```
 
+# GLFWIC duplicates?
+-we filterd out Minnoesta so only look for dups in Wisconsin
+```{r}
+g_count <- glifwc_merge %>% 
+  filter(state == "Wisconsin") %>% 
+  group_by(state_id, spp_code, year) %>% 
+  summarise(n_g = n())
+
+wis_count <- wi_hg_merge %>% 
+  group_by(state_id, spp_code, collector, year) %>% 
+  mutate(spp_code = tolower(spp_code),
+         spp_code = str_replace(pattern = " ",replacement = "_", spp_code)) %>% 
+  summarise(n_wis = n())
+
+check <- g_count %>% 
+  inner_join(wis_count)
+
+check %>% 
+  filter(n_wis != n_g)
+rm(g_count, wis_count, check)
+
+#looks like we have a good amount of obvious duplicates, lets take a look to see if we can just filter out any WI GLIFWC samples
+#first look at a case where it appears GLIFWC and WI both did sampling
+glifwc_merge %>% 
+  filter(state_id == "2321800" & spp_code == "walleye" & year == 1992) %>% 
+  arrange(length_in, hg_ppm)
+
+wi_hg_merge %>% 
+  mutate(spp_code = tolower(spp_code),
+         spp_code = str_replace(pattern = " ",replacement = "_", spp_code)) %>%
+  filter(state_id == "2321800" & spp_code == "walleye" & year == 1992) %>% 
+  select(state_id, waterbody, year, spp_code, length_in, hg_ppm, collector) %>% 
+  arrange(length_in, hg_ppm)
+#looks like these are not duplicates, they sampled similar length fish but their ppm is different
+
+#now lets look a lake where GLIFWC is the collector 
+glifwc_merge %>% 
+  filter(state_id == "2329600" & spp_code == "walleye" & year == 1996) %>% 
+  arrange(length_in, hg_ppm)
+
+wi_hg_merge %>% 
+  mutate(spp_code = tolower(spp_code),
+         spp_code = str_replace(pattern = " ",replacement = "_", spp_code)) %>%
+  filter(state_id == "2329600" & spp_code == "walleye" & year == 1996) %>% 
+  select(state_id, waterbody, year, spp_code, length_in, hg_ppm, collector) %>% 
+  arrange(length_in, hg_ppm)
+#these values are the same
+
+# I am going to move forward by just filtering out any Wisconsin sample that had a collection labeled GLIFWC
+
+#make sure the GLIFWC filter checks with how many GLIFWC samples are in WI
+wi_hg_merge %>% 
+   summarize(
+    total = n(),
+    glifwc = sum(str_detect(collector, "GLIFWC"), na.rm = TRUE),
+    missing_collector = sum(is.na(collector)),
+    filtered = glifwc + missing_collector
+  )
+#lets just remove the GLIFWC samples (and keep NA collector)
+
+wi_hg_merge <- wi_hg_merge %>% 
+  filter(is.na(collector) | !str_detect(pattern = "GLIFWC", collector)) %>% 
+  select(-collector)
+```
+
+
 # combine hg data
 ```{r}
 #glifwc and mn 
@@ -203,6 +311,7 @@ rm(glifwc,
 
 # lagos data aggregation
 -this chunk uses the lagos data from the drive in prep to connect to hg data
+-I create a ready to use product that can be read in so this chunk can be skipped
 ```{r}
 #crosswalk for lagos id to nhdhr
 xwalk <- read_csv(file.path("G:",
@@ -235,7 +344,7 @@ lagos_watershed_lulc %>%
   summarise(n = n(),
             n_lakes = n_distinct(zoneid))
 
-#take only the most recent year and remove some unnessary variables 
+#take only the most recent year and remove some unnecessary variables 
 most_recent_landcover <- lagos_watershed_lulc %>% 
   filter(year == 2016) %>% 
   select(-spatial_division,
@@ -472,7 +581,6 @@ Notes on bad lagos links:
 - for example Ida appears to have 20+ DOWS (but that must be a drag error in excel)
 - there appears to still be some id errors in the data (ex one record in data 11305000 says gull, but the real gull lake is 11030500)
 3. looks like almost all of the wisconsin misses are Rivers or creeks - tired to look a few up on the web page and couldn't locate them
-4. all michigan are misses because we don't currently have a state level id from glifwc
 
 **Try nhdhr cross walk to see if that works for some missing lakes**
 
@@ -747,6 +855,6 @@ I did not standardize some of the columns not important to predictive modeling (
 
 # save data
 ```{r}
-write_csv(hg_data_trial, "hg_data_comb_12DEC2025.csv")
+#write_csv(hg_data_trial, "hg_data_comb_12DEC2025.csv")
 ```
 
