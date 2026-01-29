@@ -35,20 +35,21 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("D:",
+mw_hg <- read_csv(file.path("E:",
                             "Shared drives",
                             "Hansen Lab",
                             "RESEARCH PROJECTS",
                             "Statewide mercury modeling",
                             "Predictive Modeling",
                             "Data",
-                            "hg_data_comb_12DEC2025.csv"))
+                            "hg_data_comb_29JAN2026.csv"))
 ```
 
 # landcover exploration 
 ```{r}
 #development?
 mw_hg %>% 
+  group_by(state) %>% 
   distinct(lagos_id, .keep_all = T) %>% 
   mutate(pct_developed = nlcd_devopen21_pct +
                 nlcd_devlow22_pct +
@@ -206,8 +207,6 @@ mw_hg_prep %>%
   distinct(lagos_id, species) %>%
   anti_join(hg.data.loo.mw, by = c("species", "lagos_id")) %>% 
   semi_join(hg.data.loo.mw, by = "lagos_id") 
-
-#write_csv(hg.data.loo.mw, "hg_model_data_loo_mw.csv")
 rm(loo_spec_lakes)
 ```
 
@@ -216,11 +215,11 @@ rm(loo_spec_lakes)
 -anti join to who fish data set that has been prepped
 -this generates a dataset of the fish left out of the model fit
 ```{r}
-# write_csv(hg.data.loo.mw, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
+#write_csv(hg.data.loo.mw, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -369,8 +368,7 @@ left_out_scaled <- left_out_scaled %>%
   filter(scaled_length >= -3 & scaled_length <= 3) %>% 
   select(-length_mean, -length_sd)
 ```
-*We loose 19 spec-lake combos in the training data (hg.data.loo.mw) when trimming for scaled length*
-*We loose 2 spec-lake combos in the training data (hg.data.loo.mw) when trimming for scaled length*
+*We loose spec-lake combos in the training data (hg.data.loo.mw) when trimming for scaled length*
 
 # map of data
 ```{r}
@@ -398,8 +396,32 @@ data_for_map <- data_for_map %>%
 rm(lat_lon)
 
 # making map
-states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+mn_wi <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
   filter(ID %in% c("minnesota", "wisconsin"))
+
+#only the up
+sf_use_s2(F)
+up_counties <- c(
+  "alger", "baraga", "chippewa", "delta", "dickinson",
+  "gogebic", "houghton", "iron", "keweenaw", "luce",
+  "mackinac", "marquette", "menominee", "ontonagon", "schoolcraft"
+)
+
+upper_mi <- st_as_sf(
+  map(
+    "county",
+    regions = paste0("michigan,", up_counties),
+    plot = FALSE,
+    fill = TRUE
+  )
+) %>%
+  st_union() %>%
+  st_as_sf() %>% 
+  rename(geom = x) %>% 
+  mutate(ID = "michigan")
+sf_use_s2(T)
+states <- bind_rows(upper_mi, mn_wi)
+rm(mn_wi, upper_mi)
 
 data_for_map <- data_for_map %>%
   st_as_sf(coords = c("lon_decdeg", "lat_decdeg"), 
@@ -463,7 +485,7 @@ ggplot() +
     legend.spacing.y = unit(0.4, "cm"),
     axis.text.x = element_text(angle = 30, hjust = 1)) 
 #ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
-rm(states, data_for_map)
+rm(states, data_for_map, up_counties)
 ```
 
 # summary of data for modeling
@@ -544,24 +566,31 @@ rm(train_lakes, train_species_by_lake)
 
 # fit model
 ```{r}
-# fit <- brm(log_hgppm ~
-#                  scaled_length*species +
-#                  species +
-#                  scaled_logit_wetwood +
-#              scaled_logit_wetemerge +
-#                  scaled_logit_formix +
-#              scaled_logit_forcon +
-#              scaled_logit_fordec +
-#                  scaled_log_ws_area_ratio +
-#                  scaled_log_area +
-#                  (1|lagos_id),
-#                       data = hg.data.loo.mw,
-#                       iter = 10000,
-#                       warmup = 500,
-#                      chains = 3,
-#                       family = gaussian())
+#set priors for all models so they are consistent across runs and not informed by the data
+priors <- c(prior(normal(1,100), class = Intercept),
+            prior(student_t(3, 0, 2.5), class = sd),
+            prior(student_t(3,0,2.5), class = sigma))
 
-# saveRDS(fit, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+fit <- brm(log_hgppm ~
+                 scaled_length*species +
+                 species +
+                 scaled_logit_wetwood +
+             scaled_logit_wetemerge +
+                 scaled_logit_formix +
+             scaled_logit_forcon +
+             scaled_logit_fordec +
+                 scaled_log_ws_area_ratio +
+                 scaled_log_area +
+                 (1|lagos_id),
+                      data = hg.data.loo.mw,
+                      iter = 10000,
+                      warmup = 500,
+                     chains = 3,
+                      family = gaussian(),
+           prior = priors)
+rm(priors)
+
+# saveRDS(fit, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
 fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 ```
@@ -579,7 +608,7 @@ summary(fit)
 predictions <- left_out_scaled %>% 
   add_predicted_draws(fit, ndraws = 500, allow_new_levels = T)
 
-#write_csv(predictions, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
+# write_csv(predictions, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 
 predictions <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 rm(fit)
