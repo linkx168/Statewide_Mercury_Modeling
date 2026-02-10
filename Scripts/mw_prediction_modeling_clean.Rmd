@@ -45,7 +45,7 @@ mw_hg <- read_csv(file.path("G:",
                             "hg_data_comb_29JAN2026.csv"))
 ```
 
-# landcover exploration 
+# landcover and LOD exploration 
 ```{r}
 #development?
 mw_hg %>% 
@@ -97,8 +97,34 @@ mw_hg %>%
     .groups = "drop"
   )
 #forest and wetlands have a good count for the wetlands and will keep
-#ag, grass, pasture, shrub all are pretty low and not ecologically relevent 
+#ag, grass, pasture, shrub all are pretty low and not ecologically relevant 
 rm(vars_to_check)
+
+##############LOD check########################################################
+#is there a clear LOD by state?
+mw_hg %>% 
+  group_by(state) %>% 
+  summarise(min = min(hg_ppm, na.rm = T),
+            n_fish_min = sum(hg_ppm == min(hg_ppm, na.rm = T), na.rm = T)) 
+#so many there is no clear lod in mi and wi?
+
+mw_hg %>% 
+  filter(hg_ppm <= 0.01) %>% 
+  group_by(state, hg_ppm) %>% 
+  count()
+
+#lets try to look at a histogram of vary small values to see if there is a value that is common at low values... lets say anything below 0.11
+mw_hg %>% 
+  filter(hg_ppm < 0.11) %>% 
+  ggplot() +
+  geom_histogram(aes(hg_ppm), binwidth = 0.001) +
+  geom_histogram(data = mw_hg %>% 
+                   filter(hg_ppm == 0.01), aes(x = hg_ppm), fill = "yellow", binwidth = 0.001) +
+  geom_vline(xintercept = c(0.005, 0.0075, 0.01, 0.05, 0.1)) +
+  facet_wrap(~state)
+
+#okay the only state with a clear LOD appears to be MN with 0.01, all other states not having one
+# MN and maybe WI have something going on with the level of precision that values were reported at - favoring 0.00 rather than 0.000
 ```
 
 # data prep
@@ -217,9 +243,9 @@ rm(loo_spec_lakes)
 ```{r}
 #write_csv(hg.data.loo.mw, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -562,6 +588,17 @@ analysis_total %>%
   
 
 rm(train_lakes, train_species_by_lake)
+
+#years?
+analysis_total %>% 
+  group_by(state) %>% 
+  summarise(min = min(year), 
+            max = max(year))
+
+#sample type
+analysis_total %>% 
+  group_by(state, sample_type) %>% 
+  count()
 ```
 
 # fit model
@@ -616,7 +653,7 @@ rm(priors)
 
 # saveRDS(fit, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
-fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 ```
 
 # check model fit
@@ -634,7 +671,7 @@ predictions <- left_out_scaled %>%
 
 # write_csv(predictions, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 
-predictions <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
+predictions <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 rm(fit)
 ```
 
@@ -733,7 +770,8 @@ lake_species_compare %>%
   count() %>% 
   group_by(lake_status) %>% 
   mutate(total_lakes = sum(n),
-         prop = n/total_lakes)
+         prop = n/total_lakes) %>% 
+  arrange(lake_status)
 
 lake_species_compare %>% 
   group_by(lake_status) %>% 
@@ -858,7 +896,7 @@ miss <- lake_species_compare %>%
 miss
 
 #clean up work space
-rm(metrics, miss, predictions_summary, predictions_summary_original, lake_species_compare, lake_species_metrics)
+rm(metrics, miss, lake_species_compare, lake_species_metrics)
 ```
 
 # hot spot map
@@ -869,12 +907,12 @@ rm(metrics, miss, predictions_summary, predictions_summary_original, lake_specie
 ```{r}
 ########dataframe for lakes we would like to predict########################
 #lake link
-lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
 #crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("D:",
+xwalk <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -882,7 +920,7 @@ xwalk <- read_csv(file.path("D:",
 glimpse(xwalk)
 
 #land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("D:",
+lagos_watershed_lulc <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -899,7 +937,7 @@ most_recent_landcover <- lagos_watershed_lulc %>%
 rm(lagos_watershed_lulc)
 
 #watershed attributes data
-lagos_watershed <- read_csv(file.path("D:",
+lagos_watershed <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -911,6 +949,7 @@ covary <- lagos_watershed %>%
   left_join(most_recent_landcover) %>% 
   mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
                                 str_detect(ws_states, "WI") ~ "y",
+                                str_detect(ws_states, "MI") ~ "y",
                                 TRUE ~ "n")) %>% 
   filter(state_keep == "y")
 rm(lagos_watershed,
@@ -1001,7 +1040,7 @@ pred_spec
 pred_full <- crossing(pred_data, pred_spec)
 rm(pred_data, pred_spec)
 #############################################################################
-fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
 #predicting at the lake-spec level 
 #####here we can change the number of draws###########

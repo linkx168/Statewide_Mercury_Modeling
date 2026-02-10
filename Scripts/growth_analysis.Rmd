@@ -24,7 +24,7 @@ library(rnaturalearthdata)
 -growth data from MN
 -zm and ssw lakes from mn infested waters list
 ```{r}
-mn_data <- open_dataset(sources = file.path("D:",
+mn_data <- open_dataset(sources = file.path("G:",
                                             "Shared drives",
                                             "Hansen Lab",
                                             "RESEARCH PROJECTS",
