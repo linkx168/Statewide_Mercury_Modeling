@@ -35,7 +35,7 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("G:",
+mw_hg <- read_csv(file.path("D:",
                             "Shared drives",
                             "Hansen Lab",
                             "RESEARCH PROJECTS",
@@ -243,9 +243,9 @@ rm(loo_spec_lakes)
 ```{r}
 #write_csv(hg.data.loo.mw, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -502,15 +502,15 @@ ggplot() +
   guides(color = guide_legend(direction = "horizontal"),
          size = guide_legend(direction = "horizontal")) +
   theme_minimal() +
-  theme(legend.position = c(.69, .15),
+  theme(legend.position = c(.65, .15),
         legend.box = "horiztonal",
-    legend.key.size = unit(0.6, "lines"),
-    legend.title = element_text(size = 10),
-    legend.text  = element_text(size = 8),
-    legend.spacing.x = unit(0.4, "cm"),
-    legend.spacing.y = unit(0.4, "cm"),
+    legend.key.size = unit(0.3, "lines"),
+    legend.title = element_text(size = 8),
+    legend.text  = element_text(size = 7),
+    legend.spacing.x = unit(0.2, "cm"),
+    legend.spacing.y = unit(0.2, "cm"),
     axis.text.x = element_text(angle = 30, hjust = 1)) 
-#ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
+#ggsave("samples_by_spec.jpg", height = 6, width = 6, dpi = 600)
 rm(states, data_for_map, up_counties)
 ```
 
@@ -671,7 +671,7 @@ predictions <- left_out_scaled %>%
 
 # write_csv(predictions, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 
-predictions <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
+predictions <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 rm(fit)
 ```
 
@@ -907,12 +907,12 @@ rm(metrics, miss, lake_species_compare, lake_species_metrics)
 ```{r}
 ########dataframe for lakes we would like to predict########################
 #lake link
-lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
 #crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("G:",
+xwalk <- read_csv(file.path("D:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -920,7 +920,7 @@ xwalk <- read_csv(file.path("G:",
 glimpse(xwalk)
 
 #land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("G:",
+lagos_watershed_lulc <- read_csv(file.path("D:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -937,7 +937,7 @@ most_recent_landcover <- lagos_watershed_lulc %>%
 rm(lagos_watershed_lulc)
 
 #watershed attributes data
-lagos_watershed <- read_csv(file.path("G:",
+lagos_watershed <- read_csv(file.path("D:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -949,7 +949,6 @@ covary <- lagos_watershed %>%
   left_join(most_recent_landcover) %>% 
   mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
                                 str_detect(ws_states, "WI") ~ "y",
-                                str_detect(ws_states, "MI") ~ "y",
                                 TRUE ~ "n")) %>% 
   filter(state_keep == "y")
 rm(lagos_watershed,
@@ -1040,7 +1039,7 @@ pred_spec
 pred_full <- crossing(pred_data, pred_spec)
 rm(pred_data, pred_spec)
 #############################################################################
-fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
 #predicting at the lake-spec level 
 #####here we can change the number of draws###########
@@ -1048,7 +1047,7 @@ lake_spec_pred <- pred_full %>%
   add_epred_draws(fit, ndraws = 500, allow_new_levels = TRUE)
 rm(fit, pred_full)
 
-#here we have 500 draw for each row because there is only one length within each lake-spec
+#here we have 500 draws for each row because there is only one length within each lake-spec
 lake_spec_sum <- lake_spec_pred %>% 
   #prediction in original scale
   mutate(back_transformed = exp(.epred)) %>% 
@@ -1084,26 +1083,46 @@ lake_sf <- lake_spec_sum %>%
                              species == "yellow_perch" ~ "Yellow Perch",
                              species == "white_sucker" ~ "White Sucker")) 
 
-states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+mn_wi <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
   filter(ID %in% c("minnesota", "wisconsin"))
+
+#only the up
+sf_use_s2(F)
+up_counties <- c(
+  "alger", "baraga", "chippewa", "delta", "dickinson",
+  "gogebic", "houghton", "iron", "keweenaw", "luce",
+  "mackinac", "marquette", "menominee", "ontonagon", "schoolcraft"
+)
+
+upper_mi <- st_as_sf(
+  map(
+    "county",
+    regions = paste0("michigan,", up_counties),
+    plot = FALSE,
+    fill = TRUE
+  )
+) %>%
+  st_union() %>%
+  st_as_sf() %>% 
+  rename(geom = x) %>% 
+  mutate(ID = "michigan")
+sf_use_s2(T)
+states <- bind_rows(upper_mi, mn_wi)
+rm(mn_wi, upper_mi)
 
 #map with prob over 0.22
 ggplot() +
   geom_sf(data = states, fill = "white", color = "black") +
   geom_sf(
-    data = lake_sf,
-    aes(
-      color = prob_over,
-      alpha = .5
-    )
-  ) +
+    data = lake_sf, aes(color = prob_over), alpha = .2, size = 0.5) +
   facet_wrap(~ species) +
   scale_color_viridis_c(option = "plasma",
+                        direction = -1,
                         name = "Probability Over 0.22 ppm") +
   theme_minimal() +
-  theme(legend.position = c(.65, .01),
+  theme(legend.position = c(.65, .05),
         axis.text.x = element_text(angle = 30, hjust = 1))
-#ggsave("prob_map.jpg", height = 5, width = 5, dpi = 600)
+#ggsave("prob_map.jpg", height = 6, width = 6, dpi = 600)
 
 
 #create four grouping for "risk" based on posterior prob over 0.22
@@ -1139,8 +1158,33 @@ lake_sf <- lake_spec_sum %>%
                              species == "yellow_perch" ~ "Yellow Perch",
                              species == "white_sucker" ~ "White Sucker")) 
 
-states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+mn_wi <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
   filter(ID %in% c("minnesota", "wisconsin"))
+
+#only the up
+sf_use_s2(F)
+up_counties <- c(
+  "alger", "baraga", "chippewa", "delta", "dickinson",
+  "gogebic", "houghton", "iron", "keweenaw", "luce",
+  "mackinac", "marquette", "menominee", "ontonagon", "schoolcraft"
+)
+
+upper_mi <- st_as_sf(
+  map(
+    "county",
+    regions = paste0("michigan,", up_counties),
+    plot = FALSE,
+    fill = TRUE
+  )
+) %>%
+  st_union() %>%
+  st_as_sf() %>% 
+  rename(geom = x) %>% 
+  mutate(ID = "michigan")
+sf_use_s2(T)
+states <- bind_rows(upper_mi, mn_wi)
+rm(mn_wi, upper_mi)
+
 
 #map with color by grouping
 ggplot() +
@@ -1148,28 +1192,31 @@ ggplot() +
     data = lake_sf,
     aes(
       color = risk,
-      shape = risk
+      #shape = risk
     ),
-    alpha = .6
+    alpha = .2,
+    size = 0.5
   ) +
-  scale_shape_manual("Risk for Consumption", values = c(15, 16, 17, 18),
-                     labels = c("High", "Worth a Check", "Yellow Flag", "Low")) +
+  # scale_shape_manual("Risk for Consumption", values = c(15, 16, 17, 18),
+  #                    labels = c("High", "Worth a Check", "Yellow Flag", "Low")) +
   scale_color_manual("Risk for Consumption", 
                      values = c("#CC79A7", "#D55E00", "#0072B2", "#009E73"),
                      labels = c("High", "Worth a Check", "Yellow Flag", "Low")) +
   geom_sf(data = states, fill = NA, color = "black", alpha = .5) +
   facet_wrap(~ species) +
   theme_minimal() +
+  guides(
+  color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
   theme(legend.box = "horizontal",
-    legend.position = c(.65, .15),
-    legend.key.size = unit(0.6, "lines"),
-    legend.title = element_text(size = 10),
-    legend.text  = element_text(size = 8),
-    legend.spacing.x = unit(0.4, "cm"),
-    legend.spacing.y = unit(0.4, "cm"),
+    legend.position = c(.65, .10),
+    legend.key.size = unit(.8, "lines"),
+    legend.title = element_text(size = 12),
+    legend.text  = element_text(size = 10),
+    legend.spacing.x = unit(0.6, "cm"),
+    legend.spacing.y = unit(0.6, "cm"),
     axis.text.x = element_text(angle = 30, hjust = 1)
     )
-#ggsave("prediciton_map_levels.jpg", height = 5, width = 5, dpi = 600)
+#ggsave("prediciton_map_levels.jpg", height = 6, width = 6, dpi = 600)
 
 ############################################################################
 lake_spec_sum %>% 
@@ -1317,53 +1364,88 @@ rm(lake_spec_sum)
 high_risk_lakes <- lakes %>% 
   #filter for the probs over being 0.8
   filter(prob_over >= 0.8) %>% 
-  distinct(lagos_id, species, .keep_all =  T)
+  distinct(lagos_id, species, .keep_all =  T) %>% 
+  mutate(risk = "High")
 
+low_risk_lakes <- lakes %>% 
+  filter(prob_over <= 0.2) %>% 
+  distinct(lagos_id, species, .keep_all = T) %>% 
+  mutate(risk = "Low")
 
-numeric_summary_by_species <- high_risk_lakes %>%
-  group_by(species) %>%
-  summarise(across(c(ws_focallakewaterarea_ha,
+lake_risk <- bind_rows(high_risk_lakes, low_risk_lakes)
+rm(high_risk_lakes, low_risk_lakes)
+
+#lets try a violin with the original data
+plot_data <- lake_risk %>% 
+  mutate(species = case_when(species == "white_sucker" ~ "White Sucker",
+                             species == "northern_pike" ~ "Northern Pike",
+                             species == "bluegill" ~ "Bluegill",
+                             species == "black_crappie" ~ "Black Crappie",
+                             species == "walleye" ~ "Walleye",
+                             species == "yellow_perch" ~ "Yellow Perch",
+                             species == "largemouth_bass" ~ "Largemouth Bass")) %>% 
+  select(lagos_id,
+         species,
+         ws_focallakewaterarea_ha,
          ws_lake_arearatio,
          nlcd_forcon42_pct,
          nlcd_formix43_pct,
          nlcd_fordec41_pct,
          nlcd_wetemerg95_pct,
-         nlcd_wetwood90_pct),
-                   list(mean = ~mean(.x),
-                        sd = ~sd(.x),
-                        min = ~min(.x),
-                        max = ~max(.x))))
-
-numeric_long <- numeric_summary_by_species %>%
+         nlcd_wetwood90_pct,
+         risk) %>% 
   pivot_longer(
-    cols = -species,
+    cols = c(-species, -risk, -lagos_id),
     names_to = c("variable", "stat"),
     names_sep = "_(?=[a-z]+$)"
-  ) %>%
-  pivot_wider(names_from = stat, values_from = value)
-
-ggplot(numeric_long, aes(x = species, y = mean, fill = species)) +
-  geom_col() +
-  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), width = 0.2) +
+  ) %>% 
+  mutate(variable = case_when(variable == "nlcd_forcon42" ~ "Coniferous Forest",
+                              variable == "nlcd_fordec41" ~ "Deciduous Forest",
+                              variable == "nlcd_formix43" ~ "Mixed Forest",
+                              variable == "nlcd_wetemerg95" ~ "Wetlands Emergent",
+                              variable == "nlcd_wetwood90" ~ "Wetlands Woody",
+                              variable == "ws_focallakewaterarea" ~ "Lake Area",
+                              variable == "ws_lake" ~ "Watershed:Lake Area",
+                              TRUE ~ NA)) 
+plot_data %>% 
+  ggplot() +
+  geom_boxplot(aes(species, value, fill = risk), outlier.alpha = .2) +
   facet_wrap(~variable, scales = "free_y") +
   theme_minimal() +
-  guides(fill = "none") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(
-    y = "Mean ± SD"
-  )
-#ggsave("risky_lakes.jpg", height = 5, width = 5, dpi = 600)
+  labs(y = "Mean ± SD")
 
-ggplot(numeric_long, aes(x = variable, y = mean, fill = variable)) +
-  geom_col() +
-  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), width = 0.2) +
-  facet_wrap(~species, scales = "free_y") +
+plot_data %>% 
+  ggplot() +
+  stat_pointinterval(aes(x = species, value, color = risk), 
+                     .width = c(.66, .95),
+                     position = position_dodge(width = .5)
+                     )+
+  labs(x = NULL) +
+  facet_wrap(~variable, scales = "free_y") +
   theme_minimal() +
-  guides(fill = "none") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(
-    y = "Mean ± SD"
-  )
+  theme(axis.text.x = element_text(angle = 40, hjust = 1)) +
+  labs(y = "Median (points), 66% and 95% of lakes (intervals)") +
+  scale_color_discrete(name = "Mercury Risk Group") +
+  theme(legend.position = c(.65, .02))
+#ggsave("lake_covarites_dotplot.jpg", height = 5, width = 7, dpi = 600)
+rm(plot_data, lake_risk)
+
+######################standard beta look#####################################
+fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+
+mcmc_plot(fit, type = "intervals")
+#black crappie is the intercept 
+
+mcmc_plot(fit, type = "intervals",
+          variable = c("b_scaled_logit_wetwood",
+                       "b_scaled_logit_wetemerge",
+                       "b_scaled_logit_formix",
+                       "b_scaled_logit_forcon",
+                       "b_scaled_logit_fordec",
+                       "b_scaled_log_ws_area_ratio",
+                       "b_scaled_log_area"))
+#ggsave("beta_plots.jpg", height = 5, width = 5, dpi = 600)
 ```
 
 
@@ -1378,12 +1460,12 @@ ggplot(numeric_long, aes(x = variable, y = mean, fill = variable)) +
 ```{r}
 #grab lake data
 #lake link
-lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
 #crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("G:",
+xwalk <- read_csv(file.path("D:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1391,7 +1473,7 @@ xwalk <- read_csv(file.path("G:",
 glimpse(xwalk)
 
 #land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("G:",
+lagos_watershed_lulc <- read_csv(file.path("D:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1408,7 +1490,7 @@ most_recent_landcover <- lagos_watershed_lulc %>%
 rm(lagos_watershed_lulc)
 
 #watershed attributes data
-lagos_watershed <- read_csv(file.path("G:",
+lagos_watershed <- read_csv(file.path("D:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1490,8 +1572,9 @@ pred_data <- pred_data %>%
 
 ##############################################################################
 #estimate crossing by solving the equation 
+fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
-#first grab grab the draws from the model fit
+#first grab the draws from the model fit
 draws <- as_draws_df(fit)
 rm(fit)
 
@@ -1603,7 +1686,7 @@ results <- bind_rows(results) %>%
 #saving results
 # write_csv(results, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
 
-results <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
+results <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
 
 ###########################################################################
 # connect back to lake data
@@ -1639,7 +1722,7 @@ final_results %>%
   ggplot() +
   geom_density(aes(length, fill = in_sample), alpha = .5) +
   facet_wrap(~species)
-#interesting the smallest length (-7.62) was from bone lake in Minnesota, only 1 sample of white sucker which was SUPER high, shifting the random effect, thus we see pike heavily influenced
+#interesting the smallest length (-6.75) was from bone lake in Minnesota, only 1 sample of white sucker which was SUPER high, shifting the random effect, thus we see pike heavily influenced
 
 #the in sample pike was from Ryan lake in MN St. Louis county with super high measured mercury
 
@@ -1702,9 +1785,43 @@ ggplot(sum_length, aes(x = reorder(species, mean), y = mean)) +
 lake_sf <- final_results %>%
   st_as_sf(coords = c("lake_lon_decdeg", "lake_lat_decdeg"), crs = 4326)
 
-states <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
+# making map
+mn_wi <- st_as_sf(map("state", plot = FALSE, fill = TRUE)) %>%
   filter(ID %in% c("minnesota", "wisconsin"))
 
+#only the up
+sf_use_s2(F)
+up_counties <- c(
+  "alger", "baraga", "chippewa", "delta", "dickinson",
+  "gogebic", "houghton", "iron", "keweenaw", "luce",
+  "mackinac", "marquette", "menominee", "ontonagon", "schoolcraft"
+)
+
+upper_mi <- st_as_sf(
+  map(
+    "county",
+    regions = paste0("michigan,", up_counties),
+    plot = FALSE,
+    fill = TRUE
+  )
+) %>%
+  st_union() %>%
+  st_as_sf() %>% 
+  rename(geom = x) %>% 
+  mutate(ID = "michigan")
+sf_use_s2(T)
+states <- bind_rows(upper_mi, mn_wi)
+rm(mn_wi, upper_mi)
+
+
+lake_sf <- lake_sf %>% 
+  mutate(species = case_when(species == "white_sucker" ~ "White Sucker",
+                             species == "northern_pike" ~ "Northern Pike",
+                             species == "bluegill" ~ "Bluegill",
+                             species == "black_crappie" ~ "Black Crappie",
+                             species == "walleye" ~ "Walleye",
+                             species == "yellow_perch" ~ "Yellow Perch",
+                             species == "largemouth_bass" ~ "Largemouth Bass"))
 
 ggplot() +
   geom_sf(data = states, fill = "white", color = "black") +
@@ -1712,16 +1829,20 @@ ggplot() +
     data = lake_sf,
     aes(
       color = length,
-      alpha = .5
-    )
+    ),
+    alpha = 0.2,
+    size = 0.5
   ) +
   facet_wrap(~ species) +
   scale_color_viridis_c(option = "plasma",
-                        name = "Length (inches)") +
+                        name = "Length (inches)",
+                        direction = -1) +
   theme_minimal() +
-  theme(legend.position = c(.65, .01),
+  theme(legend.position = c(.6, .1),
         axis.text.x = element_text(angle = 30, hjust = 1))
 #ggsave("length_threshold_map.jpg", height = 5, width = 5, dpi = 600)
+
+rm(lake_sf, final_results, lagos_watershed_lulc)
 ```
 
 
