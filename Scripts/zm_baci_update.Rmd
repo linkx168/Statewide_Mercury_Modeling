@@ -37,7 +37,7 @@ fixlakeid <- function(lakeid){
 # Data
 ```{r}
 #mercury data
-hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
+hg <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Mercury Data", "allfish_data_04042024_JLO.csv")) %>% 
   filter(!(is.na(LGTHIN) | is.na(HGPPM) | is.na(DOWID))) %>%   #removes samples with no hg, length, or dow data
   filter(TYPE %in% c("Lake", "LAKE")) %>% 
   mutate(DOWID = fixlakeid(DOWID)) %>% 
@@ -68,7 +68,7 @@ hg <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS
   ungroup()
 
 #connection to covariates
-dnr_covary <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
+dnr_covary <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "MN_lakes_watershed_lulc_fromDNR.csv")) %>% 
   mutate(logit_wetlands = car::logit(Percent_Wetland),
          logit_urban = car::logit(Percent_Urban),
          logit_ag = car::logit(Percent_Cultivated_Crops),
@@ -87,7 +87,7 @@ hg <- hg %>%
 rm(dnr_covary, scaled_dnr)
 
 #glm - for clarity and area values
-glm <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
+glm <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "glm_lake_metadata.csv")) %>%
   filter(state == "MN") %>% 
   rename(nhdid = site_id) %>% 
   mutate(nhdid = gsub("^nhdhr_", "", nhdid)) %>% 
@@ -352,9 +352,9 @@ hg.model %>%
 ```{r}
 #pre lake grouping filtering (removing small fish and dealing with fish @ the LOD)
 hg.model <- hg.model %>% 
-  filter(lgthin >= 5) %>% 
-  filter(!(spec == "BLG" & lgthin > 20)) %>% 
-  filter(!(spec == "BLC" & lgthin > 20)) %>% 
+  filter(lgthin >= 5) %>%
+  filter(!(spec == "BLG" & lgthin > 20)) %>%
+  filter(!(spec == "BLC" & lgthin > 20)) %>%
   mutate(hgppm = case_when(hgcode == "K" ~ hgppm*0.5,
                            TRUE ~ hgppm))
 
@@ -515,6 +515,29 @@ blc_data <- create_species_data(species = "BLC", data = hg.model, lag_variable =
 lmb_data <- create_species_data(species = "LMB", data = hg.model, lag_variable = "zm_sample_lag_2")
 yep_data <- create_species_data(species = "YEP", data = hg.model, lag_variable = "zm_sample_lag_2")
 # wts_data <- create_species_data(species = "WTS", data = hg.model, lag_variable = "zm_sample_lag_2")
+
+hg.model <- bind_rows(blc_data, blg_data, lmb_data, nop_data, wae_data, yep_data)
+
+#when looking at the difference between full and filtered for length - diff of 24 samples, only 22 when you directly applied it to the full data set without the filtering script because one lake keeps two bluegill recoreds but loosing post-invasion samples. Thus, when running the filter script, that entire lake-species is filtered out 
+
+# hg.model.full %>% 
+#   filter(dow == "32001800" & spec == "YEP") %>% 
+#   glimpse()
+# 
+# diff <- anti_join(hg.model.full, hg.model, 
+#                   by = c("dow", "spec", "lgthin"))
+# 
+# removed <- diff %>% 
+#   group_by(dow, spec, zm_sample_lag_2) %>% 
+#   summarise(n_removed = n())
+# 
+# hg.model.full %>% 
+#   semi_join(removed, by = c("dow", "spec")) %>%  
+#   group_by(dow, spec, zm_lake, zm_sample_lag_2) %>% 
+#   count() %>% 
+#   left_join(removed) %>% 
+#   mutate(prop_removed = n_removed/n) %>% 
+#   print(n = nrow(.))
 
 # Define species list and lagged variable names (including non-lagged "zm_sample")
 species_list <- c("WAE", "NOP", "BLG", "BLC", "LMB", "YEP")
@@ -3197,6 +3220,16 @@ ggsave("modeled_random_effects.jpg")
 
 # Old code 
 ```{r}
+#checking after for 5 inchers
+hg.model.filter %>% 
+  filter(lgthin <= 5) %>%
+  group_by(spec) %>% 
+  count()
+
+
+
+###########################################################################
+
 #creating data for entire baci analysis 
 combined_data <- bind_rows(nop_data,
                            wae_data,

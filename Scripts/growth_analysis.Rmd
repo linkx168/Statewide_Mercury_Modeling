@@ -18,6 +18,7 @@ library(ggspatial)
 library(ggthemes)
 library(rnaturalearth)
 library(rnaturalearthdata)
+library(leaflet)
 ```
 
 # Data
@@ -363,6 +364,73 @@ zm_ssw <- read_csv("Data/zm_ssw_6jan2026.csv") %>%
 #mercury data
 hg <- read_csv("Data/allfish_data_04042024_JLO.csv") 
 
+#clean hg data now
+clean_dowid <- function(id) {
+  if (is.na(id) || id == "") return(NA_character_)  # Handle NA values
+  id_clean <- str_replace_all(id, "-", "")  # Remove dashes
+  return(id_clean)
+}
+
+hg <- hg %>% 
+  mutate(dow = map_chr(DOWID, clean_dowid))
+rm(clean_dowid)
+
+#build xwalk to lagos data
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+  distinct(lake_nhdid, .keep_all = T) %>% 
+  rename(nhdid = lake_nhdid)
+
+#crosswalk for lagos id to nhdhr
+xwalk <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_link.csv"))
+glimpse(xwalk)
+
+#land use land cover data
+lagos_watershed_lulc <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lagos_watershed_lulc.csv"))
+glimpse(lagos_watershed_lulc)
+
+most_recent_landcover <- lagos_watershed_lulc %>% 
+  filter(year == 2016) %>% 
+  select(-spatial_division,
+         -year,
+         -datacoveragepct,
+         -precision) %>% 
+  rename(lagoslakeid = zoneid)
+rm(lagos_watershed_lulc)
+
+#watershed attributes data
+lagos_watershed <- read_csv(file.path("G:",
+                          "Shared drives",
+                          "Hansen Lab",
+                          "LAGOS data extraction",
+                          "lake_watersheds.csv"))
+glimpse(lagos_watershed)
+
+#join lagos data#
+covary <- lagos_watershed %>% 
+  left_join(most_recent_landcover) %>% 
+  mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
+                                TRUE ~ "n")) %>% 
+  filter(state_keep == "y")
+rm(lagos_watershed,
+   most_recent_landcover)
+
+#lets just grab the lagos id, nhdhr, name, and coords for cross walking
+xwalk <- xwalk %>% 
+  distinct(lagoslakeid, lake_nhdid, .keep_all = T)
+
+#grabbing cross walk information via lagos id (really interested in the nhdhr)
+covary <- covary %>% 
+  left_join(xwalk, relationship = "one-to-one")
+rm(xwalk)
+
 
 ########################clean data #############################################
 #fix invasion data
@@ -398,46 +466,298 @@ zm_ssw <- zm_ssw %>%
   rename(zm_year_infested = `zebra mussel`,
          ssw_year_infested = `starry stonewort`)
 
-#clean hg data now
-clean_dowid <- function(id) {
-  if (is.na(id) || id == "") return(NA_character_)  # Handle NA values
-  id_clean <- str_replace_all(id, "-", "")  # Remove dashes
-  return(id_clean)
-}
-
-hg <- hg %>% 
-  mutate(dow = map_chr(DOWID, clean_dowid))
-rm(clean_dowid)
-
 # looking at lakes across the state with zm and ssw
-############### across state exploration ################################
 zm_ssw_lakes <- zm_ssw %>% 
   filter(!is.na(dow)) %>% 
   filter(!(str_detect(dow, "none")))
+rm(zm_ssw, lake_link)
 
+#add covarites 
+zm_ssw_lakes <- zm_ssw_lakes %>% 
+  local_to_lagos(from_colname = "dow",states = "mn") %>% 
+  mutate(lagoslakeid = as.numeric(lagos.id)) %>% 
+  left_join(covary)
+rm(covary)
+
+#add some mercury info
+hg_years <- hg %>% 
+  group_by(dow) %>% 
+  summarise(n_hg_years = n_distinct(YEARCOLL))
+
+zm_ssw_lakes <- zm_ssw_lakes %>% 
+  left_join(hg_years)
+rm(hg_years)
+
+############### across state exploration ################################
 zm_ssw_lakes %>% 
   summarise(zm_only = sum(!is.na(zm_year_infested) & is.na(ssw_year_infested)),
             ssw_only = sum(is.na(zm_year_infested) & !is.na(ssw_year_infested)),
             zm_and_ssw = sum(!is.na(zm_year_infested) & !is.na(ssw_year_infested)))
 
 #only starry lakes
-zm_ssw_lakes %>% 
-  left_join(hg %>% 
-              distinct(dow, WATERWAY), by = "dow") %>% 
-  filter(is.na(zm_year_infested) & !is.na(ssw_year_infested))
-# upper red, wolf, and rush DO have zm but they list zm with a different dow in list
-# for example Upper red is listed wtih 04003500 for zm but 04003501 for ssw
+ssw_only <- zm_ssw_lakes %>% 
+  filter(is.na(zm_year_infested) & !is.na(ssw_year_infested)) %>% 
+  mutate(notes = case_when(dow == "04003501" ~ "zm listed with different dow",
+                           dow == "04006300" ~ "ssw not listed on lakefinder",
+                           TRUE ~ NA),
+         invasion = "ssw only")
+# upper red DOES have zm but they list zm with a different dow in list, listed wtih 04003500 for zm but 04003501 for ssw
 # north twin (04006300) does not have starry listed on lake finder
-# Bowen shows both zm and starry on lake finder
+
+ssw_only <- ssw_only %>% 
+  select(dow,
+         lagoslakeid,
+         lake_nhdid,
+         lake_namelagos,
+         ws_lat_decdeg,
+         ws_lon_decdeg,
+         ssw_year_infested,
+         zm_year_infested,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         nlcd_wetwood90_pct,
+         nlcd_wetemerg95_pct,
+         notes,
+         invasion,
+         n_hg_years)
+
+ssw_map <- ssw_only %>%
+  mutate(
+    popup_text = paste0(
+      "<b>", lake_namelagos, "</b><br>",
+      "DOW: ", dow, "<br>",
+      "SSW infest year: ", ssw_year_infested, "<br>",
+      "Lake area (ha): ", round(ws_focallakewaterarea_ha, 1), "<br>",
+      "Watershed area (ha): ", round(ws_area_ha, 1), "<br>",
+      "WS:Lake ratio: ", round(ws_lake_arearatio, 2), "<br>",
+      "Wooded wetland %: ", round(nlcd_wetwood90_pct, 1), "<br>",
+      "Emergent wetland %: ", round(nlcd_wetemerg95_pct, 1), "<br>",
+      "Notes : ", notes, "<br>",
+      "Hg Years : ", n_hg_years
+    )
+  )
+
+leaflet(ssw_map) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircleMarkers(
+    lng = ~ws_lon_decdeg,
+    lat = ~ws_lat_decdeg,
+    stroke = TRUE,
+    weight = 1,
+    fillOpacity = 0.7,
+    popup = ~popup_text,      # click popup
+    label = ~lake_namelagos   # hover name
+  )
+
+rm(ssw_map)
 
 # both
-zm_ssw_lakes %>% 
-  left_join(hg %>% 
-              distinct(dow, WATERWAY), by = "dow") %>% 
+both <- zm_ssw_lakes %>% 
   filter(!is.na(zm_year_infested) & !is.na(ssw_year_infested)) %>% 
-  print(n = nrow(.))
+  mutate(notes = as.character(NA),
+         invasion = "zm and ssw")
+
+both <- both %>% 
+  select(dow,
+         lagoslakeid,
+         lake_nhdid,
+         lake_namelagos,
+         ws_lat_decdeg,
+         ws_lon_decdeg,
+         ssw_year_infested,
+         zm_year_infested,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         nlcd_wetwood90_pct,
+         nlcd_wetemerg95_pct,
+         notes,
+         invasion,
+         n_hg_years)
+
+both_map <- both %>%
+  mutate(
+    popup_text = paste0(
+      "<b>", lake_namelagos, "</b><br>",
+      "DOW: ", dow, "<br>",
+      "SSW infest year: ", ssw_year_infested, "<br>",
+      "Lake area (ha): ", round(ws_focallakewaterarea_ha, 1), "<br>",
+      "Watershed area (ha): ", round(ws_area_ha, 1), "<br>",
+      "WS:Lake ratio: ", round(ws_lake_arearatio, 2), "<br>",
+      "Wooded wetland %: ", round(nlcd_wetwood90_pct, 1), "<br>",
+      "Emergent wetland %: ", round(nlcd_wetemerg95_pct, 1), "<br>",
+      "Hg Years : ", n_hg_years
+    )
+  )
+
+leaflet(both_map) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircleMarkers(
+    lng = ~ws_lon_decdeg,
+    lat = ~ws_lat_decdeg,
+    stroke = TRUE,
+    weight = 1,
+    fillOpacity = 0.7,
+    popup = ~popup_text,      # click popup
+    label = ~lake_namelagos   # hover name
+  )
+
+rm(both_map)
+
+#map together
+combined_map <- bind_rows(ssw_only, both)
+
+combined_map <- combined_map %>%
+  mutate(
+    popup_text = paste0(
+      "<b>", lake_namelagos, "</b><br>",
+      "DOW: ", dow, "<br>",
+      "Invasion: ", invasion, "<br>",
+      "SSW year: ", ssw_year_infested, "<br>",
+      "ZM year: ", zm_year_infested, "<br>",
+      "Lake area (ha): ", round(ws_focallakewaterarea_ha,1), "<br>",
+      "Watershed area (ha): ", round(ws_area_ha,1), "<br>",
+      "WS:Lake ratio: ", round(ws_lake_arearatio,2), "<br>",
+      "Wooded wetland %: ", round(nlcd_wetwood90_pct,1), "<br>",
+      "Emergent wetland %: ", round(nlcd_wetemerg95_pct,1), "<br>",
+      "Hg Years : ", n_hg_years, "<br>",
+      "Notes: ", ifelse(is.na(notes),"",notes)
+    )
+  )
+
+pal <- colorFactor(
+  palette = c("green", "darkred"),
+  domain = combined_map$invasion
+)
+
+combined <- leaflet(combined_map) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircleMarkers(
+    lng = ~ws_lon_decdeg,
+    lat = ~ws_lat_decdeg,
+    fillColor = ~pal(invasion),
+    color = "black",
+    weight = 1,
+    fillOpacity = 0.8,
+    popup = ~popup_text,
+    label = ~lake_namelagos
+  ) %>%
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = ~invasion,
+    title = "Lake category"
+  ) 
+htmlwidgets::saveWidget(combined, "ssw_zm_map.html", selfcontained = TRUE)
+
+#add only zm
+zm_only <- zm_ssw_lakes %>% 
+  filter(!is.na(zm_year_infested) & is.na(ssw_year_infested)) %>% 
+  mutate(notes = as.character(NA),
+         invasion = "zm only")
+
+zm_only <- zm_only %>% 
+  select(dow,
+         lagoslakeid,
+         lake_nhdid,
+         lake_namelagos,
+         ws_lat_decdeg,
+         ws_lon_decdeg,
+         ssw_year_infested,
+         zm_year_infested,
+         ws_focallakewaterarea_ha,
+         ws_area_ha,
+         ws_lake_arearatio,
+         nlcd_wetwood90_pct,
+         nlcd_wetemerg95_pct,
+         notes,
+         invasion,
+         n_hg_years)
+
+zm_only_map <- zm_only %>%
+  mutate(
+    popup_text = paste0(
+      "<b>", lake_namelagos, "</b><br>",
+      "DOW: ", dow, "<br>",
+      "SSW infest year: ", ssw_year_infested, "<br>",
+      "Lake area (ha): ", round(ws_focallakewaterarea_ha, 1), "<br>",
+      "Watershed area (ha): ", round(ws_area_ha, 1), "<br>",
+      "WS:Lake ratio: ", round(ws_lake_arearatio, 2), "<br>",
+      "Wooded wetland %: ", round(nlcd_wetwood90_pct, 1), "<br>",
+      "Emergent wetland %: ", round(nlcd_wetemerg95_pct, 1), "<br>",
+      "Hg Years : ", n_hg_years
+    )
+  )
+
+leaflet(zm_only_map) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircleMarkers(
+    lng = ~ws_lon_decdeg,
+    lat = ~ws_lat_decdeg,
+    stroke = TRUE,
+    weight = 1,
+    fillOpacity = 0.7,
+    popup = ~popup_text,      # click popup
+    label = ~lake_namelagos   # hover name
+  )
+rm(zm_only_map)
+
+###all###
+#map together
+all_map <- bind_rows(ssw_only, both, zm_only)
+
+all_map <- all_map %>%
+  mutate(
+    popup_text = paste0(
+      "<b>", lake_namelagos, "</b><br>",
+      "DOW: ", dow, "<br>",
+      "Invasion: ", invasion, "<br>",
+      "SSW year: ", ssw_year_infested, "<br>",
+      "ZM year: ", zm_year_infested, "<br>",
+      "Lake area (ha): ", round(ws_focallakewaterarea_ha,1), "<br>",
+      "Watershed area (ha): ", round(ws_area_ha,1), "<br>",
+      "WS:Lake ratio: ", round(ws_lake_arearatio,2), "<br>",
+      "Wooded wetland %: ", round(nlcd_wetwood90_pct,1), "<br>",
+      "Emergent wetland %: ", round(nlcd_wetemerg95_pct,1), "<br>",
+      "Hg Years : ", n_hg_years, "<br>",
+      "Notes: ", ifelse(is.na(notes),"",notes)
+    )
+  )
+
+pal <- colorFactor(
+  palette = c("green", "darkred", "lightblue"),
+  domain = all_map$invasion
+)
+
+combined <- leaflet(all_map) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircleMarkers(
+    lng = ~ws_lon_decdeg,
+    lat = ~ws_lat_decdeg,
+    fillColor = ~pal(invasion),
+    color = "black",
+    weight = 1,
+    fillOpacity = 0.8,
+    popup = ~popup_text,
+    label = ~lake_namelagos
+  ) %>%
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = ~invasion,
+    title = "Lake category"
+  ) 
+htmlwidgets::saveWidget(combined, "ssw_zm_map_all.html", selfcontained = TRUE)
 
 ###############lets look at the lakes we studied prior######################
+
+
+
+
+
+
+
 # there are several lakes we probably want to further explore the dow relationship to spatial resolution (or maybe consider parent dow)
 
 hg %>% 
