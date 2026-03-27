@@ -147,7 +147,10 @@ mw_hg_prep <- mw_hg %>%
          sample_type,
          num_fish_in_sample,
          length_in,
-         hg_ppm) 
+         hg_ppm,
+         hg_lab,
+         hg_code,
+         hg_notes) 
 ```
 Sample types generally all look comparable and samples with more than one fish are smaller species that we should probably keep (at least for now)
 
@@ -179,6 +182,84 @@ mw_hg_prep <- mw_hg_prep %>%
   #no NA lengths or hg
   filter(!is.na(length_in) & !is.na(hg_ppm))
 ```
+
+# exploring filtered data
+```{r}
+#composite samples
+mw_hg_prep %>% 
+  summarise(na = sum(is.na(num_fish_in_sample)),
+            ind_record = sum(num_fish_in_sample == 1, na.rm = T),
+            comp_sample = sum(num_fish_in_sample > 1, na.rm = T),
+            total_fish = n(),
+            prop_na = na/total_fish,
+            prop_comp = comp_sample/total_fish,
+            prop_ind = ind_record/total_fish)
+
+mw_hg_prep %>% 
+  group_by(species) %>% 
+  summarise(na = sum(is.na(num_fish_in_sample)),
+            ind_record = sum(num_fish_in_sample == 1, na.rm = T),
+            comp_sample = sum(num_fish_in_sample > 1, na.rm = T),
+            total_fish = n(),
+            prop_na = na/total_fish,
+            prop_comp = comp_sample/total_fish,
+            prop_ind = ind_record/total_fish)
+
+
+
+#sample types
+mw_hg_prep %>% 
+  distinct(state, sample_type)
+
+mw_hg_prep %>% 
+  mutate(sample_type_clean = tolower(sample_type),
+         sample_type_clean = case_when(sample_type_clean == "skin on fillet" ~ "filsk",
+                                       sample_type_clean == "whole fish" ~ "whorg",
+                                       sample_type_clean == "skin off fillet" ~ "filet",
+                                       sample_type_clean == "skin on fillet" ~ "filsk",
+                                       TRUE ~ sample_type_clean)) %>% 
+  group_by(sample_type_clean) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(n_total = sum(n),
+            prop = n/n_total)
+
+#limit of detection
+#start with MN becuase they give us info in metadata
+mw_hg_prep %>% 
+  filter(hg_code == "K") %>% 
+  group_by(hg_ppm) %>% 
+  count()
+#this is after correction
+
+mw_hg_prep %>% 
+  group_by(state) %>% 
+  summarise(min = min(hg_ppm, na.rm = T),
+            n_fish_min = sum(hg_ppm == min(hg_ppm, na.rm = T), na.rm = T)) 
+
+mw_hg_prep %>% 
+  filter(hg_ppm <= 0.015) %>% 
+  group_by(state, hg_ppm) %>% 
+  count() %>% 
+  arrange(desc(hg_ppm))  %>% 
+  print(n = nrow(.))
+#no clear lod in mi and wi?
+
+#lets try to look at a histogram of vary small values to see if there is a value that is common at low values... lets say anything below 0.11
+mw_hg_prep %>% 
+  filter(hg_ppm < 0.11) %>% 
+  ggplot() +
+  geom_histogram(aes(hg_ppm), binwidth = 0.001) +
+  geom_histogram(data = mw_hg_prep %>% 
+                   filter(hg_ppm == 0.005), aes(x = hg_ppm), fill = "yellow", binwidth = 0.001) +
+  facet_wrap(~state)
+#okay the only state with a clear LOD appears to be MN with 0.01 (0.005 here after correction), all other states not having one
+
+mw_hg_prep %>% 
+  group_by(state) %>% 
+  summarise(n_lakes = n_distinct(lagos_id))
+```
+
 
 # leave out data
 -leave out 15% of species-lake combinations
