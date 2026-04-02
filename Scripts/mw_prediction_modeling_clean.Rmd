@@ -2461,3 +2461,38 @@ hg.data.loo.mw %>%
   count()
 ```
 
+# R shiny Output
+```{r}
+length_grid <- tibble(
+  species = c("walleye","northern_pike","black_crappie",
+              "largemouth_bass","bluegill","white_sucker","yellow_perch")
+) %>%
+  left_join(length_scalers, by = "species") %>%
+  rowwise() %>%
+  mutate(length_seq = list(seq(
+    length_mean - 2*length_sd,
+    length_mean + 2*length_sd,
+    length.out = 10
+  ))) %>%
+  unnest(length_seq) %>%
+  rename(length = length_seq) %>%
+  mutate(scaled_length = (length - length_mean)/length_sd)
+
+curve_pred_data <- crossing(pred_data, length_grid)
+
+curve_draws <- curve_pred_data %>% 
+  add_epred_draws(fit, ndraws = 200, allow_new_levels = T)
+
+curve_summary <- curve_draws %>%
+  mutate(hgppm = exp(.epred)) %>%
+  group_by(lagos_id, species, length) %>%
+  summarise(
+    hg = median(hgppm),
+    lower = quantile(hgppm, 0.1),
+    upper = quantile(hgppm, 0.9),
+    .groups = "drop"
+  )
+
+saveRDS(curve_summary, "curve_summary.rds")
+```
+
