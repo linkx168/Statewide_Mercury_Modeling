@@ -2685,6 +2685,20 @@ rm(obs_lake_species,
 
 ## length thresholds
 ```{r}
-results <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
+ln_x <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
+
+ln_x <- ln_x %>% 
+  select(lagos_id,
+         species,
+         length,
+         length_lower,
+         length_upper)
+#median of the draws
+
+#quick check 
+ln_x %>% 
+  #leech lake
+  filter(lagos_id == "996")
+saveRDS(ln_x, "length_crossing.rds")
 ```
 
