@@ -164,9 +164,13 @@ Sample types generally all look comparable and samples with more than one fish a
 mw_hg_prep <- mw_hg_prep %>% 
   #year filter
   filter(year > 1999) %>% 
-  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent
-  mutate(hg_ppm = case_when(hg_ppm <= 0.01 ~ hg_ppm/2,
-                           TRUE ~ hg_ppm)) %>% 
+  #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent *removed on 4/8 per eagles smith 2016*
+  # mutate(hg_ppm = case_when(hg_ppm <= 0.01 ~ hg_ppm/2,
+  #                          TRUE ~ hg_ppm)) %>% 
+  #correct whole body samples to fillets as eagle-smith 2016
+  mutate(hg_ppm = case_when(sample_type %in% c("WHORG", "WHOLE FISH") ~
+                              hg_ppm/0.74,
+                            TRUE ~ hg_ppm)) %>% 
   #getting rid of some wonky ratios - worth coming back to
   filter(watershed_lake_area_ratio < 100) %>% 
   #species of interest (had enough sample size in MN)
@@ -225,12 +229,11 @@ mw_hg_prep %>%
             prop = n/n_total)
 
 #limit of detection
-#start with MN becuase they give us info in metadata
+#start with MN because they give us info in metadata
 mw_hg_prep %>% 
   filter(hg_code == "K") %>% 
-  group_by(hg_ppm) %>% 
+  group_by(state, hg_ppm) %>% 
   count()
-#this is after correction
 
 mw_hg_prep %>% 
   group_by(state) %>% 
@@ -251,10 +254,17 @@ mw_hg_prep %>%
   ggplot() +
   geom_histogram(aes(hg_ppm), binwidth = 0.001) +
   geom_histogram(data = mw_hg_prep %>% 
-                   filter(hg_ppm == 0.005), aes(x = hg_ppm), fill = "yellow", binwidth = 0.001) +
+                   filter(hg_ppm == 0.01), aes(x = hg_ppm), fill = "yellow", binwidth = 0.001) +
   facet_wrap(~state)
-#okay the only state with a clear LOD appears to be MN with 0.01 (0.005 here after correction), all other states not having one
+#okay the only state with a clear LOD appears to be MN with 0.01, with no inferred LOD from the data 
 
+mw_hg_prep %>% 
+  summarise(n_fish = n(),
+            n_under = sum(hg_ppm <= 0.01),
+            prop_under = n_under/n_fish)
+
+
+#how many lakes by state
 mw_hg_prep %>% 
   group_by(state) %>% 
   summarise(n_lakes = n_distinct(lagos_id))
@@ -752,13 +762,13 @@ predictions <- left_out_scaled %>%
 
 # write_csv(predictions, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 
-predictions <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
+predictions <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 rm(fit)
 ```
 
 
 # predicitons at the lake-species level - ignores fish level variation 
-
+## Confusion Matrix
 Lets compare how well we predict the observed mean within a species-lake:
 1. calculate the mean values within a species-lake (we will use the same length of fish for predictions so we won't have to worry about that)
 2. from the predicted values, calculate the mean of value of each spec-lake. This would mean averaging across species, lake, .draw. (grouping by draw gets us each observation within lake-species and thus a mean mercury value for the grouping) - we will get 500 draws of each mean
@@ -988,12 +998,12 @@ rm(metrics, miss, lake_species_compare, lake_species_metrics)
 ```{r}
 ########dataframe for lakes we would like to predict########################
 #lake link
-lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
 #crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("D:",
+xwalk <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1001,7 +1011,7 @@ xwalk <- read_csv(file.path("D:",
 glimpse(xwalk)
 
 #land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("D:",
+lagos_watershed_lulc <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1018,7 +1028,7 @@ most_recent_landcover <- lagos_watershed_lulc %>%
 rm(lagos_watershed_lulc)
 
 #watershed attributes data
-lagos_watershed <- read_csv(file.path("D:",
+lagos_watershed <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1030,6 +1040,7 @@ covary <- lagos_watershed %>%
   left_join(most_recent_landcover) %>% 
   mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
                                 str_detect(ws_states, "WI") ~ "y",
+                                str_detect(ws_states, "MI") ~ "y",
                                 TRUE ~ "n")) %>% 
   filter(state_keep == "y")
 rm(lagos_watershed,
@@ -1041,6 +1052,7 @@ xwalk <- xwalk %>%
          lake_nhdid,
          lake_namegnis,
          lake_namelagos,
+         lake_county,
          lake_lat_decdeg,
          lake_lon_decdeg)
 
@@ -1048,6 +1060,20 @@ xwalk <- xwalk %>%
 covary <- covary %>% 
   left_join(xwalk, relationship = "one-to-one")
 rm(xwalk)
+
+up_counties <- c(
+  "Alger", "Baraga", "Chippewa", "Delta", "Dickinson",
+  "Gogebic", "Houghton", "Iron", "Keweenaw", "Luce",
+  "Mackinac", "Marquette", "Menominee", "Ontonagon", "Schoolcraft"
+)
+
+#Keep none-MI lakes OR keep counties listed in the UP
+covary <- covary %>% 
+  filter(!str_detect(ws_states, "MI") | lake_county %in% up_counties)
+
+covary %>% 
+  group_by(ws_states) %>% 
+  summarise(n_counties = n_distinct(lake_county))
 #############################################################################
 pred_data <- covary %>% 
   select(lagos_id = lagoslakeid,
@@ -1120,7 +1146,7 @@ pred_spec
 pred_full <- crossing(pred_data, pred_spec)
 rm(pred_data, pred_spec)
 #############################################################################
-fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
 #predicting at the lake-spec level 
 #####here we can change the number of draws###########
@@ -1151,6 +1177,8 @@ lake_spec_sum <- lake_spec_sum %>%
                      lake_lat_decdeg,
                      lake_lon_decdeg))
 rm(lake_link)
+
+# write_csv(lake_spec_sum, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "lake_spec_hg_at_harvest.csv"))
 
 ###################making map#############################
 
@@ -1583,6 +1611,7 @@ covary <- lagos_watershed %>%
   left_join(most_recent_landcover) %>% 
   mutate(state_keep = case_when(str_detect(ws_states, "MN") ~ "y",
                                 str_detect(ws_states, "WI") ~ "y",
+                                str_detect(ws_states, "MI") ~ "y",
                                 TRUE ~ "n")) %>% 
   filter(state_keep == "y")
 rm(lagos_watershed,
@@ -1594,6 +1623,7 @@ xwalk <- xwalk %>%
          lake_nhdid,
          lake_namegnis,
          lake_namelagos,
+         lake_county,
          lake_lat_decdeg,
          lake_lon_decdeg)
 
@@ -1601,6 +1631,20 @@ xwalk <- xwalk %>%
 covary <- covary %>% 
   left_join(xwalk, relationship = "one-to-one")
 rm(xwalk)
+
+up_counties <- c(
+  "Alger", "Baraga", "Chippewa", "Delta", "Dickinson",
+  "Gogebic", "Houghton", "Iron", "Keweenaw", "Luce",
+  "Mackinac", "Marquette", "Menominee", "Ontonagon", "Schoolcraft"
+)
+
+#Keep none-MI lakes OR keep counties listed in the UP
+covary <- covary %>% 
+  filter(!str_detect(ws_states, "MI") | lake_county %in% up_counties)
+
+covary %>% 
+  group_by(ws_states) %>% 
+  summarise(n_counties = n_distinct(lake_county))
 #############################################################################
 pred_data <- covary %>% 
   select(lagos_id = lagoslakeid,
@@ -1765,9 +1809,9 @@ results <- bind_rows(results) %>%
           length_lower = (l_lo90*length_sd) + length_mean,
           length_upper = (l_hi90*length_sd) + length_mean)
 #saving results
-# write_csv(results, file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
+# write_csv(results, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
 
-results <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
+results <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
 
 ###########################################################################
 # connect back to lake data
@@ -1861,6 +1905,47 @@ ggplot(sum_length, aes(x = reorder(species, mean), y = mean)) +
   theme_bw()
 #ggsave("region_length_avg.jpg", height = 5, width = 5, dpi = 600)
 
+plot_df <- sum_length %>%
+  left_join(pred_spec, by = "species") %>%
+  mutate(risk = harvest_length > mean)
+
+ggplot(plot_df, aes(y = reorder(species, harvest_length))) +
+  
+  # uncertainty around threshold
+  geom_errorbarh(
+    aes(xmin = mean - sd, xmax = mean + sd),
+    height = 0,
+    size = 0.8
+  ) +
+  
+  # line connecting threshold to harvest (the "risk gap")
+  geom_segment(
+    aes(x = mean, xend = harvest_length, yend = species,
+        color = risk),
+    size = 1.2,
+    alpha = 0.5,show.legend = F
+  ) +
+  
+  # threshold point (mean)
+  geom_point(aes(x = mean), size = 3) +
+  
+  # harvest point
+  geom_point(
+    aes(x = harvest_length),
+    shape = 21,
+    fill = "white",
+    size = 3,
+    stroke = 1
+  ) +
+  
+  labs(
+    x = "Length (Inches)",
+    y = NULL,
+    color = "Higher Risk\n(Harvest > Threshold)"
+  ) +
+  scale_color_manual(values = c("lightblue", "salmon")) +
+  theme_bw()
+#ggsave("region_length_avg_color.jpg", height = 5, width = 5, dpi = 600)
 
 ##########################################################################
 lake_sf <- final_results %>%
@@ -2675,6 +2760,44 @@ lake_data_level %>%
 
 hg.data.loo.mw %>% 
   distinct(lagos_id, species)
+
+#gather some other information to display
+xwalk <- mw_hg %>% 
+  group_by(lagos_id) %>% 
+  summarise(latest_year = max(year),
+            state_id = paste(unique(state_id), collapse = ", "),
+            lake_name = paste(unique(lake_name), collapse = ", "),
+            .groups = "drop") %>% 
+  mutate(lagos_id = as.character(lagos_id))
+
+xwalk_unobserved <- pred_data %>% 
+  left_join(lake_link %>% 
+              rename(lagos_id = lagoslakeid) %>% 
+              mutate(state = case_when(lake_centroidstate == "MN" ~ "Minnesota",
+                                       lake_centroidstate == "WI" ~ "Wisconsin",
+                                       TRUE ~ lake_centroidstate))) %>% 
+  select(lagos_id,
+    lake_name = lake_namegnis,
+         state,
+         lat_decdeg = ws_lat_decdeg,
+         lon_decdeg = ws_lon_decdeg,
+         lake_area_ha,
+         watershed_lake_area_ratio,
+         nlcd_forcon42_pct,
+         nlcd_formix43_pct,
+         nlcd_fordec41_pct,
+         nlcd_wetemerg95_pct,
+         nlcd_wetwood90_pct) %>% 
+  mutate(lagos_id = as.character(lagos_id))
+#we could do a local to lagos here to retrive state ids but there will be issue with multipule state ids within a lagos, but lets skip for now
+all_lakes <- xwalk_unobserved %>% 
+  left_join(xwalk)
+rm(xwalk, xwalk_unobserved)
+
+#add this to the other lake data
+lake_data_level <- lake_data_level %>% 
+  left_join(all_lakes)
+
 #we currently don't include the MI lakes
 saveRDS(lake_data_level, "lake_data_level.rds")
 rm(obs_lake_species,
