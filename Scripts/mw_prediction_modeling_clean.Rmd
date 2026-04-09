@@ -35,7 +35,7 @@ library(emmeans)
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("G:",
+mw_hg <- read_csv(file.path("D:",
                             "Shared drives",
                             "Hansen Lab",
                             "RESEARCH PROJECTS",
@@ -201,6 +201,16 @@ mw_hg_prep %>%
 
 mw_hg_prep %>% 
   group_by(species) %>% 
+  summarise(na = sum(is.na(num_fish_in_sample)),
+            ind_record = sum(num_fish_in_sample == 1, na.rm = T),
+            comp_sample = sum(num_fish_in_sample > 1, na.rm = T),
+            total_fish = n(),
+            prop_na = na/total_fish,
+            prop_comp = comp_sample/total_fish,
+            prop_ind = ind_record/total_fish)
+
+mw_hg_prep %>% 
+  group_by(state) %>% 
   summarise(na = sum(is.na(num_fish_in_sample)),
             ind_record = sum(num_fish_in_sample == 1, na.rm = T),
             comp_sample = sum(num_fish_in_sample > 1, na.rm = T),
