@@ -40,7 +40,7 @@ options(brms.backend = "cmdstanr")
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("G:",
+mw_hg <- read_csv(file.path("D:",
                             "Shared drives",
                             "Hansen Lab",
                             "RESEARCH PROJECTS",
@@ -349,9 +349,9 @@ rm(loo_spec_lakes)
 ```{r}
  # write_csv(hg.data.loo.mw, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -721,6 +721,9 @@ analysis_total %>%
 analysis_total %>% 
   summarise(n_lakes = n_distinct(lagos_id),
             n_fish = n())
+
+analysis_total %>% 
+  summarise(n_distinct(lagos_id, species))
   
 
 rm(train_lakes, train_species_by_lake)
@@ -731,10 +734,69 @@ analysis_total %>%
   summarise(min = min(year), 
             max = max(year))
 
+ analysis_total %>% 
+  summarise(n_fish = n(),
+            n_under = sum(hg_ppm <= 0.01),
+            prop_under = n_under/n_fish)
+
 #sample type
 analysis_total %>% 
-  group_by(state, sample_type) %>% 
-  count()
+  distinct(state, sample_type)
+
+analysis_total %>% 
+  mutate(sample_type_clean = tolower(sample_type),
+         sample_type_clean = case_when(sample_type_clean == "skin on fillet" ~ "filsk",
+                                       sample_type_clean == "whole fish" ~ "whorg",
+                                       sample_type_clean == "skin off fillet" ~ "filet",
+                                       sample_type_clean == "skin on fillet" ~ "filsk",
+                                       TRUE ~ sample_type_clean)) %>% 
+  group_by(sample_type_clean) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(n_total = sum(n),
+            prop = n/n_total)
+
+
+#composite samples
+analysis_total %>% 
+  summarise(na = sum(is.na(num_fish_in_sample)),
+            ind_record = sum(num_fish_in_sample == 1, na.rm = T),
+            comp_sample = sum(num_fish_in_sample > 1, na.rm = T),
+            total_fish = n(),
+            prop_na = na/total_fish,
+            prop_comp = comp_sample/total_fish,
+            prop_ind = ind_record/total_fish)
+
+analysis_total %>% 
+  group_by(species) %>% 
+  summarise(na = sum(is.na(num_fish_in_sample)),
+            ind_record = sum(num_fish_in_sample == 1, na.rm = T),
+            comp_sample = sum(num_fish_in_sample > 1, na.rm = T),
+            total_fish = n(),
+            prop_na = na/total_fish,
+            prop_comp = comp_sample/total_fish,
+            prop_ind = ind_record/total_fish)
+
+analysis_total %>% 
+  group_by(state) %>% 
+  summarise(na = sum(is.na(num_fish_in_sample)),
+            ind_record = sum(num_fish_in_sample == 1, na.rm = T),
+            comp_sample = sum(num_fish_in_sample > 1, na.rm = T),
+            total_fish = n(),
+            prop_na = na/total_fish,
+            prop_comp = comp_sample/total_fish,
+            prop_ind = ind_record/total_fish)
+
+#fish size summaires
+fish_size <- analysis_total %>% 
+  group_by(species, data) %>% 
+  summarise(min = min(length_in),
+            mean = mean(length_in),
+            max = max(length_in),
+            sd = sd(length_in),
+            n = n())
+#write_csv(fish_size, "fish_size.csv")
+rm(fish_size)
 ```
 
 # fit model
