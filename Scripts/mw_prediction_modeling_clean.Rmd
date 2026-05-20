@@ -784,6 +784,7 @@ fit <- brm(log_hgppm ~
                       warmup = 500,
                      chains = 3,
                       family = gaussian(),
+           cores = 6,
            prior = priors,
            backend = "cmdstanr",
   threads = threading(2))
