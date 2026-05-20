@@ -165,7 +165,7 @@ Sample types generally all look comparable and samples with more than one fish a
 ```{r}
 mw_hg_prep <- mw_hg_prep %>% 
   #year filter
-  filter(year > 1999) %>% 
+  filter(year > 1999 & year < 2024) %>% 
   #dealing with LOD - taking half of the LOD - this method should hold up, but take closer look if LOD value is consistent *removed on 4/8 per eagles smith 2016*
   # mutate(hg_ppm = case_when(hg_ppm <= 0.01 ~ hg_ppm/2,
   #                          TRUE ~ hg_ppm)) %>% 
