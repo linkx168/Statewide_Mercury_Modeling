@@ -33,11 +33,14 @@ library(tigris)
 library(emmeans)
 library(ggdist)
 library(patchwork)
+#speeds up model fitting
+library(cmdstanr)
+options(brms.backend = "cmdstanr")
 ```
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("D:",
+mw_hg <- read_csv(file.path("G:",
                             "Shared drives",
                             "Hansen Lab",
                             "RESEARCH PROJECTS",
@@ -344,15 +347,22 @@ rm(loo_spec_lakes)
 -anti join to who fish data set that has been prepped
 -this generates a dataset of the fish left out of the model fit
 ```{r}
-#write_csv(hg.data.loo.mw, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo.csv"))
+ # write_csv(hg.data.loo.mw, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
-  anti_join(hg.data.loo_anti)
+  mutate(hg_ppm_join = round(hg_ppm, 10)) %>% 
+  anti_join(hg.data.loo_anti %>% 
+              mutate(hg_ppm_join = round(hg_ppm, 10)), by = c("lagos_id",
+                                                              "year",
+                                                              "species",
+                                                              "length_in",
+                                                              "hg_ppm_join")) %>% 
+  select(-hg_ppm_join)
 
 rm(hg.data.loo_anti)
 ```
@@ -774,10 +784,12 @@ fit <- brm(log_hgppm ~
                       warmup = 500,
                      chains = 3,
                       family = gaussian(),
-           prior = priors)
+           prior = priors,
+           backend = "cmdstanr",
+  threads = threading(2))
 rm(priors)
 
-# saveRDS(fit, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+# saveRDS(fit, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
 fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 ```
