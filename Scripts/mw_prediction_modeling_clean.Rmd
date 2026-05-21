@@ -40,7 +40,7 @@ options(brms.backend = "cmdstanr")
 
 # data
 ```{r}
-mw_hg <- read_csv(file.path("D:",
+mw_hg <- read_csv(file.path("G:",
                             "Shared drives",
                             "Hansen Lab",
                             "RESEARCH PROJECTS",
@@ -349,9 +349,9 @@ rm(loo_spec_lakes)
 ```{r}
  # write_csv(hg.data.loo.mw, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo.mw <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
+hg.data.loo.mw <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv"))
 
-hg.data.loo_anti <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
+hg.data.loo_anti <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Data", "hg_model_data_loo_mw.csv")) %>% 
   select(species, year, lagos_id, hg_ppm, length_in)
 
 left_out_data <- mw_hg_prep %>% 
@@ -870,7 +870,7 @@ summary(fit)
 predictions <- left_out_scaled %>% 
   add_predicted_draws(fit, ndraws = 500, allow_new_levels = T)
 
-# write_csv(predictions, file.path("E:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
+# write_csv(predictions, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 
 predictions <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output",  "predictions_left_out_mw.csv"))
 rm(fit)
@@ -993,6 +993,45 @@ mutate(correct = case_when(obs_harmful == "y" & pred_harmful == "y" ~ "y",
   mutate(total_lakes = sum(total),
          prop = total/total_lakes)
 
+
+# I imagine our values are pretty close to 0.22 when we miss - is that the case?
+lake_species_compare %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  filter(obs_harmful != pred_harmful) %>% 
+  ggplot() +
+  geom_histogram(aes(mean_obs)) +
+  geom_vline(xintercept = 0.22, linetype = "dashed")
+
+lake_species_compare %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  filter(obs_harmful != pred_harmful) %>%
+  summarise(mean = mean(mean_obs),
+            med = median(mean_obs),
+            min = min(mean_obs),
+            max = max(mean_obs),
+            avg_dist_away = mean(mean_obs - 0.22),
+            num_under_05 = sum(abs(mean_obs - 0.22) <= 0.05),
+            num_under_1 = sum(abs(mean_obs - 0.22) <= 0.1),
+            prop_under_05 = sum(abs(mean_obs - 0.22) <= 0.05)/ n(),
+            prop_under_1 = sum(abs(mean_obs - 0.22) <= 0.1)/ n())
+
+lake_species_compare %>% 
+  mutate(obs_harmful = case_when(mean_obs >= 0.22 ~ "y",
+                                 TRUE ~ "n"),
+         pred_harmful = case_when(mean_pred >= .22 ~ "y",
+                                  TRUE ~ "n")) %>% 
+  filter(obs_harmful != pred_harmful) %>%
+  filter(mean_obs > 0.5)
+#the biggest prediction is a blg at 0.6 - no wonder why we didn't predict that! - maybe a typo in the raw data?
+#funny enough this is the consumption advisory only for bullhead lake 
+
+
 metrics <- lake_species_compare %>%
   mutate(
     error = abs(mean_obs - mean_pred),
@@ -1108,12 +1147,12 @@ rm(metrics, miss, lake_species_compare, lake_species_metrics)
 ```{r}
 ########dataframe for lakes we would like to predict########################
 #lake link
-lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
 #crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("D:",
+xwalk <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1121,7 +1160,7 @@ xwalk <- read_csv(file.path("D:",
 glimpse(xwalk)
 
 #land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("D:",
+lagos_watershed_lulc <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1138,7 +1177,7 @@ most_recent_landcover <- lagos_watershed_lulc %>%
 rm(lagos_watershed_lulc)
 
 #watershed attributes data
-lagos_watershed <- read_csv(file.path("D:",
+lagos_watershed <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1290,7 +1329,7 @@ rm(lake_link)
 
 # write_csv(lake_spec_sum, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "lake_spec_hg_at_harvest.csv"))
 
-lake_spec_sum <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "lake_spec_hg_at_harvest.csv"))
+lake_spec_sum <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "lake_spec_hg_at_harvest.csv"))
 ###################making map#############################
 
 lake_sf <- lake_spec_sum %>%
