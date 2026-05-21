@@ -637,15 +637,15 @@ ggplot() +
   guides(color = guide_legend(direction = "horizontal"),
          size = guide_legend(direction = "horizontal")) +
   theme_minimal() +
-  theme(legend.position = c(.65, .15),
+  theme(legend.position = c(.52, .25),
         legend.box = "horiztonal",
-    legend.key.size = unit(0.3, "lines"),
-    legend.title = element_text(size = 8),
-    legend.text  = element_text(size = 7),
-    legend.spacing.x = unit(0.2, "cm"),
-    legend.spacing.y = unit(0.2, "cm"),
+    legend.key.size = unit(0.6, "lines"),
+    legend.title = element_text(size = 10),
+    legend.text  = element_text(size = 9),
+    legend.spacing.x = unit(0.3, "cm"),
+    legend.spacing.y = unit(0.3, "cm"),
     axis.text.x = element_text(angle = 30, hjust = 1)) 
-#ggsave("samples_by_spec.jpg", height = 6, width = 6, dpi = 600)
+ggsave("samples_by_spec.jpg", height = 5, width = 5, dpi = 600)
 
 rm(states, data_for_map, up_counties)
 ```
@@ -1379,9 +1379,9 @@ ggplot() +
                         direction = -1,
                         name = "Probability Over 0.22 ppm") +
   theme_minimal() +
-  theme(legend.position = c(.65, .05),
+  theme(legend.position = c(.65, .08),
         axis.text.x = element_text(angle = 30, hjust = 1))
-ggsave("prob_map.jpg", height = 6, width = 6, dpi = 600)
+#ggsave("prob_map.jpg", height = 6, width = 6, dpi = 600)
 
 
 #create four grouping for "risk" based on posterior prob over 0.22
@@ -1539,6 +1539,14 @@ lake_spec_sum %>%
     legend.spacing.x = unit(0.4, "cm"),
     legend.spacing.y = unit(0.4, "cm"))
 #ggsave("risk_by_species.jpg", height = 5, width = 5, dpi = 600)
+
+#################counts######################
+lake_spec_sum %>% 
+  group_by(species) %>% 
+  summarise(n_above_50 = sum(prob_over > 0.5),
+            n = n(),
+            prop_above_50 = n_above_50/n)
+
 rm(lake_spec_sum, lake_sf, lagos_watershed, lagos_watershed_lulc, xwak)
 ```
 
@@ -1548,7 +1556,7 @@ rm(lake_spec_sum, lake_sf, lagos_watershed, lagos_watershed_lulc, xwak)
    -this may be too much, but could then pull out a lake that is most alike the averages for a real example of a lake in that category 
 ```{r}
 #regular covariate plot
-fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
+fit <- readRDS(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
 
 coef_df <- as.data.frame(fixef(fit)) %>%
   rownames_to_column("term")
@@ -1580,7 +1588,7 @@ p_cov <- ggplot(coef_df2,
     height = 0
   ) +
   
-  geom_point(size = 2.5) +
+  geom_point(size = 1.5) +
   
   labs(
     x = expression(beta),
@@ -1673,7 +1681,7 @@ p_species <- ggplot(
     size = 0.8
   ) +
   
-  geom_point(size = 3) +
+  geom_point(size = 1.5) +
   
   labs(
     x = expression(beta[length]),
@@ -1687,16 +1695,16 @@ p_species <- ggplot(
 
 p_cov / p_species +
   plot_layout(heights = c(1,1.1))
-ggsave("beta_plot.jpg", height = 5, width = 5, dpi = 600)
+#ggsave("beta_plot.jpg", height = 5, width = 5, dpi = 600)
 
 ################more complex covarite plot#####################################
 #this gets at "what lakes are most risky"
-lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
 #crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("D:",
+xwalk <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1704,7 +1712,7 @@ xwalk <- read_csv(file.path("D:",
 glimpse(xwalk)
 
 #land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("D:",
+lagos_watershed_lulc <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1721,7 +1729,7 @@ most_recent_landcover <- lagos_watershed_lulc %>%
 rm(lagos_watershed_lulc)
 
 #watershed attributes data
-lagos_watershed <- read_csv(file.path("D:",
+lagos_watershed <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1842,22 +1850,6 @@ plot_data %>%
   theme(legend.position = c(.65, .02))
 #ggsave("lake_covarites_dotplot.jpg", height = 5, width = 7, dpi = 600)
 rm(plot_data, lake_risk)
-
-######################standard beta look#####################################
-fit <- readRDS(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "mw_random_leave_out.rds"))
-
-mcmc_plot(fit, type = "intervals")
-#black crappie is the intercept 
-
-mcmc_plot(fit, type = "intervals",
-          variable = c("b_scaled_logit_wetwood",
-                       "b_scaled_logit_wetemerge",
-                       "b_scaled_logit_formix",
-                       "b_scaled_logit_forcon",
-                       "b_scaled_logit_fordec",
-                       "b_scaled_log_ws_area_ratio",
-                       "b_scaled_log_area"))
-#ggsave("beta_plots.jpg", height = 5, width = 5, dpi = 600)
 ```
 
 
@@ -1872,12 +1864,12 @@ mcmc_plot(fit, type = "intervals",
 ```{r}
 #grab lake data
 #lake link
-lake_link <- read_csv(file.path("D:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
+lake_link <- read_csv(file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Data", "Covariate Data", "lake_link.csv")) %>% 
   distinct(lake_nhdid, .keep_all = T) %>% 
   rename(nhdid = lake_nhdid)
 
 #crosswalk for lagos id to nhdhr
-xwalk <- read_csv(file.path("D:",
+xwalk <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1885,7 +1877,7 @@ xwalk <- read_csv(file.path("D:",
 glimpse(xwalk)
 
 #land use land cover data
-lagos_watershed_lulc <- read_csv(file.path("D:",
+lagos_watershed_lulc <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -1902,7 +1894,7 @@ most_recent_landcover <- lagos_watershed_lulc %>%
 rm(lagos_watershed_lulc)
 
 #watershed attributes data
-lagos_watershed <- read_csv(file.path("D:",
+lagos_watershed <- read_csv(file.path("G:",
                           "Shared drives",
                           "Hansen Lab",
                           "LAGOS data extraction",
@@ -2114,7 +2106,7 @@ results <- bind_rows(results) %>%
 #saving results
 # write_csv(results, file.path("G:", "Shared drives", "Hansen Lab", "RESEARCH PROJECTS", "Statewide mercury modeling", "Predictive Modeling", "Random Model Final Output", "length_crossing_by_lake.csv"))
 
-results <- read_csv(file.path("D:",
+results <- read_csv(file.path("G:",
                               "Shared drives",
                               "Hansen Lab",
                               "RESEARCH PROJECTS",
@@ -2166,6 +2158,7 @@ sum_length <- final_results %>%
   summarise(
     min = min(length),
     mean = mean(length),
+    median = median(length),
     max = max(length),
     sd = sd(length),
     n()) %>% 
@@ -2177,6 +2170,8 @@ sum_length <- final_results %>%
                              species == "yellow_perch" ~ "Yellow Perch",
                              species == "largemouth_bass" ~ "Largemouth Bass"))
 sum_length
+
+
 
 pred_spec <- tibble(species = c("Walleye",
                              "Northern Pike",
@@ -2369,7 +2364,7 @@ ggplot(plot_df,
     legend.position = "none",
     panel.grid.minor = element_blank()
   )
-ggsave("harvest_length_violin.jpg", height = 5, width = 5, dpi = 600)
+#ggsave("harvest_length_violin.jpg", height = 5, width = 5, dpi = 600)
 
 ##########################################################################
 lake_sf <- final_results %>%
