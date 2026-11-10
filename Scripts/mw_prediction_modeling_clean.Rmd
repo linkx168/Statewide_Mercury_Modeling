@@ -14,7 +14,6 @@ library(arrow)
 library(LAGOSNE)
 library(ggrepel)
 library(mwlaxeref)
-library(mnsentinellakes)
 library(corrplot)
 library(performance)
 library(brms)
@@ -22,7 +21,6 @@ library(lme4)
 library(Matrix)
 library(car)
 library(tidybayes)
-library(rstanarm)
 library(bayesplot)
 library(loo)
 library(arrow)
@@ -877,6 +875,905 @@ rm(fit)
 ```
 
 
+# 10/29/2026 - Fish level LOO testing
+```{r}
+#lets create size bins - exploring first on the left out data
+left_out_scaled %>%
+  mutate(
+    size_group = case_when(
+      scaled_length < -0.431 ~ "Small",
+      scaled_length <= 0.431 ~ "Medium",
+      TRUE ~ "Large"
+    ),
+    size_group = factor(
+      size_group,
+      levels = c("Small", "Medium", "Large")
+    )
+  ) %>%
+  ggplot(aes(x = scaled_length)) +
+  geom_density(fill = "steelblue", alpha = 0.25) +
+  geom_rug() +
+  geom_vline(
+    xintercept = c(-0.431, 0.431),
+    linetype = "dashed"
+  ) +
+  facet_wrap(~species) +
+  labs(
+    x = "Scaled fish length (z-score)",
+    y = "Density"
+  ) +
+  theme_bw()
+#ggsave("scaled_length_dist.jpg")
+
+left_out_scaled %>%
+  mutate(
+    size_group = case_when(
+      scaled_length < -0.431 ~ "Small",
+      scaled_length <= 0.431 ~ "Medium",
+      TRUE ~ "Large"
+    )
+  ) %>%
+  count(species, size_group) %>%
+  group_by(species) %>%
+  mutate(percent = round(100 * n / sum(n), 1)) %>%
+  arrange(species, size_group) %>% 
+  print(n = nrow(.))
+
+
+# now implement 
+fish_info <- predictions %>%
+  distinct(.row, species, scaled_length, hg_ppm, lake_status)  %>% 
+  mutate(
+      size_group = case_when(
+      scaled_length < -0.431 ~ "Small",
+      scaled_length <= 0.431 ~ "Medium",
+      TRUE ~ "Large"
+    ),
+    size_group = factor(
+      size_group,
+      levels = c("Small", "Medium", "Large")
+    )
+  )
+  
+
+fish_eval <- predictions %>% 
+   mutate(
+    size_group = case_when(
+      scaled_length < -0.431 ~ "Small",
+      scaled_length <= 0.431 ~ "Medium",
+      TRUE ~ "Large"
+    ),
+    size_group = factor(
+      size_group,
+      levels = c("Small", "Medium", "Large")
+    ),
+    pred_hgppm = exp(.prediction)
+  ) %>%
+  group_by(.row) %>%
+  summarise(
+    predicted_mean = mean(pred_hgppm, na.rm = TRUE),
+    predicted_median = median(pred_hgppm, na.rm = TRUE),
+    lower_95 = quantile(pred_hgppm, 0.025, na.rm = TRUE),
+    upper_95 = quantile(pred_hgppm, 0.975, na.rm = TRUE),
+    n_draws = sum(is.finite(pred_hgppm)),
+    .groups = "drop"
+  ) %>% 
+  left_join(fish_info) %>% 
+  mutate(
+    error = predicted_median - hg_ppm,
+    abs_error = abs(error),
+    squared_error = error^2,
+    covered_95 = hg_ppm >= lower_95 &
+                 hg_ppm <= upper_95,
+    interval_width_95 = upper_95 - lower_95
+  )
+
+fish_eval %>% 
+  group_by(species, size_group) %>%
+  summarise(
+    n_fish = n(),
+    MAE = mean(abs_error),
+    RMSE = sqrt(mean(squared_error)),
+    coverage_95 = mean(covered_95),
+    mean_width_95 = mean(interval_width_95),
+    .groups = "drop"
+  ) %>% 
+  print(n = nrow(.))
+
+performance <- fish_eval %>%
+  group_by(species, size_group) %>%
+  summarise(
+    n_fish = n(),
+    MAE = mean(abs_error, na.rm = TRUE),
+    RMSE = sqrt(mean(squared_error, na.rm = TRUE)),
+    coverage_95 = mean(covered_95, na.rm = TRUE),
+    mean_width_95 = mean(interval_width_95, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+performance_long <- performance %>%
+  pivot_longer(
+    cols = c(MAE, RMSE, coverage_95, mean_width_95),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  mutate(
+    metric = dplyr::recode(
+      metric,
+      MAE = "Mean absolute error (ppm)",
+      RMSE = "Root mean squared error (ppm)",
+      coverage_95 = "95% predictive coverage",
+      mean_width_95 = "Mean 95% interval width (ppm)"
+    ),
+    species = factor(species, levels = rev(unique(species)))
+  )
+
+ggplot(
+  performance_long,
+  aes(y = value, x = species, color = size_group)
+) +
+  geom_hline(
+    data = data.frame(
+      metric = "95% predictive coverage",
+      target = 0.95
+    ),
+    aes(yintercept = target),
+    linetype = "dashed",
+    color = "grey40",
+    inherit.aes = FALSE
+  ) +
+  geom_point(
+    size = 2.5
+  ) +
+  facet_wrap(~metric, scales = "free_y", ncol = 2) +
+  labs(
+    x = NULL,
+    y = NULL,
+    color = "Fish size"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+#ggsave("pred_metrics_plot.jpg")
+rm(performance, performance_long)
+
+#viz
+fish_eval %>%
+  group_by(species) %>% 
+  arrange(scaled_length, .by_group = T) %>% 
+  mutate(fish_rank = row_number()) %>% 
+ggplot(aes(x = fish_rank)) +
+  geom_linerange(
+    aes(ymin = lower_95, ymax = upper_95),
+    color = "grey65",
+    linewidth = 0.35
+  ) +
+  geom_point(
+    aes(y = predicted_median),
+    color = "steelblue",
+    size = 1.4
+  ) +
+  geom_point(
+    aes(y = hg_ppm),
+    color = "black",
+    size = 1.2,
+    alpha = 0.8
+  ) +
+  facet_wrap(~species, scales = "free") +
+  labs(
+    x = "Fish (ordered by observed length within species)",
+    y = "Mercury concentration (ppm)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+#ggsave("obs_pred_ci.jpg")
+
+#testing with three colors 
+fish_eval %>% 
+  group_by(species) %>% 
+  arrange(scaled_length, .by_group = T) %>% 
+  mutate(fish_rank = row_number()) %>% 
+  ggplot(aes(x = fish_rank)) +
+
+  # Mercury concentration bands
+  annotate(
+    "rect",
+    xmin = -Inf, xmax = Inf,
+    ymin = 0, ymax = 0.22,
+    fill = "green3", alpha = 0.12
+  ) +
+  annotate(
+    "rect",
+    xmin = -Inf, xmax = Inf,
+    ymin = 0.22, ymax = 0.95,
+    fill = "gold", alpha = 0.15
+  ) +
+  annotate(
+    "rect",
+    xmin = -Inf, xmax = Inf,
+    ymin = 0.95, ymax = Inf,
+    fill = "red", alpha = 0.10
+  ) +
+
+  # Predictive intervals
+  geom_linerange(
+    aes(ymin = lower_95, ymax = upper_95),
+    color = "grey50",
+    linewidth = 0.35
+  ) +
+
+  # Predicted median
+  geom_point(
+    aes(y = predicted_median),
+    color = "steelblue",
+    size = 1.4
+  ) +
+
+  # Observed mercury
+  geom_point(
+    aes(y = hg_ppm),
+    color = "black",
+    size = 1.2,
+    alpha = 0.8
+  ) +
+
+  # Thresholds
+  geom_hline(
+    yintercept = c(0.22, 0.95),
+    linetype = "dashed",
+    color = "grey30"
+  ) +
+
+  facet_grid(lake_status~species, scales = "free") +
+
+  labs(
+    x = "Fish (ordered by observed Hg within species)",
+    y = "Mercury concentration (ppm)",
+    title = "Observed vs. predicted fish mercury"
+  ) +
+  coord_cartesian(ylim = c(0, NA)) +
+  theme_bw()
+#ggsave("obs_pred_ci_colors.jpg")
+
+# observed vs prediction scatter
+ggplot(
+  fish_eval,
+  aes(x = hg_ppm, y = predicted_median)
+) +
+  geom_abline(
+    intercept = 0, slope = 1,
+    linetype = "dashed", color = "grey40"
+  ) +
+  geom_smooth(aes(hg_ppm, predicted_median), method = "lm") +
+  geom_point(alpha = 0.35, size = 1.2) +
+  geom_vline(xintercept = c(0.22, 0.95)) +
+  facet_grid(lake_status~species, scales = "free") +
+  labs(
+    x = "Observed mercury (ppm)",
+    y = "Predicted median mercury (ppm)",
+    color = "Prediction setting"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+     axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+#ggsave("obs_pred_lm.jpg")
+
+###############################################################################
+#wetlands slider, okay I think it makes sense to look at how chaging wetlands affects probably of exceeding
+#lets start by pulling actual wetland values from the data
+analysis_total %>% 
+  distinct(lagos_id, .keep_all = T) %>% 
+  ggplot() +
+  geom_density(aes(nlcd_wetwood90_pct))
+
+analysis_total %>% 
+   distinct(lagos_id, .keep_all = T) %>% 
+  summarise(min = min(nlcd_wetwood90_pct),
+            median = median(nlcd_wetwood90_pct),
+            max = max(nlcd_wetwood90_pct),
+            n = n())
+
+wetwood_values <- c(
+  0.001,       # Represents 0%; avoids qlogis(0)
+  1, 2, 3, 4, 5,
+  seq(10, 70, by = 5)
+)
+
+#grab every lake and make it range with 0-75 of wetwood
+lakes_scenarios <- analysis_total %>% 
+  distinct(lagos_id,
+           lake_area_ha,
+           watershed_lake_area_ratio,
+           nlcd_fordec41_pct,
+           nlcd_forcon42_pct,
+           nlcd_formix43_pct,
+           nlcd_wetemerg95_pct) %>% 
+  crossing(nlcd_wetwood90_pct = wetwood_values)
+
+lakes_scenarios <- lakes_scenarios %>%
+  mutate(
+    # Log lake area
+    scaled_log_area = (log(lake_area_ha) -
+                  lake_scalers$mean_log_area) /
+                  lake_scalers$sd_log_area,
+
+    # Wetwood: logit transform, then scale
+    scaled_logit_wetwood = (qlogis(nlcd_wetwood90_pct / 100) -
+                       lake_scalers$mean_logit_wetwood) /
+                       lake_scalers$sd_logit_wetwood,
+
+    # Emergent wetlands
+    scaled_logit_wetemerge = (qlogis(nlcd_wetemerg95_pct / 100) -
+                         lake_scalers$mean_logit_wetemerge) /
+                         lake_scalers$sd_logit_wetemerge,
+
+    # Forest mix
+    scaled_logit_formix = (qlogis(nlcd_formix43_pct / 100) -
+                      lake_scalers$mean_logit_formix) /
+                      lake_scalers$sd_logit_formix,
+
+    # Forest conservation
+    scaled_logit_forcon = (qlogis(nlcd_forcon42_pct / 100) -
+                      lake_scalers$mean_logit_forcon) /
+                      lake_scalers$sd_logit_forcon,
+
+    # Forest deciduous
+    scaled_logit_fordec = (qlogis(nlcd_fordec41_pct / 100) -
+                      lake_scalers$mean_logit_fordec) /
+                      lake_scalers$sd_logit_fordec,
+
+    # Lake-to-watershed area ratio
+    scaled_log_ws_area_ratio = (log(watershed_lake_area_ratio) -
+                  lake_scalers$mean_lw_ratio) /
+                  lake_scalers$sd_lw_ratio
+  ) %>% 
+  mutate(species = "walleye") %>% 
+  left_join(length_scalers %>% 
+              filter(species == "walleye")) %>% 
+  mutate(
+    length = 15,
+    scaled_length = (length - length_mean) /
+                    length_sd
+  )
+```
+
+
+
+# 11/10/2026 - all covariate response curve
+```{r}
+lake_base <- analysis_total %>% 
+  distinct(lagos_id, .keep_all = TRUE) %>% 
+  select(
+    lagos_id,
+    lake_area_ha,
+    watershed_lake_area_ratio,
+    nlcd_fordec41_pct,
+    nlcd_forcon42_pct,
+    nlcd_formix43_pct,
+    nlcd_wetemerg95_pct,
+    nlcd_wetwood90_pct,
+    scaled_log_area,
+    scaled_logit_wetwood,
+    scaled_logit_wetemerge,
+    scaled_logit_formix,
+    scaled_logit_forcon,
+    scaled_logit_fordec,
+    scaled_log_ws_area_ratio
+  )
+
+fit <- readRDS(
+  file.path(
+    "G:", "Shared drives", "Hansen Lab",
+    "RESEARCH PROJECTS", "Statewide mercury modeling",
+    "Predictive Modeling", "Random Model Final Output",
+    "mw_random_leave_out.rds"
+  )
+)
+
+
+walleye_scaler <- length_scalers %>%
+  filter(species == "walleye") %>%
+  select(length_mean, length_sd) %>%
+  distinct()
+
+# Helper for observed scenario ranges
+get_range <- function(x, n = 20) {
+  r <- quantile(x, c(0.05, 0.95), na.rm = TRUE)
+
+  if (r[1] == r[2]) {
+    return(rep(r[1], n))
+  }
+
+  seq(r[1], r[2], length.out = n)
+}
+
+# Percentage variables: avoid exact 0 and 100 for logit
+get_pct_range <- function(x, n = 20) {
+  values <- get_range(x, n)
+
+  pmin(pmax(values, 0.001), 99.999)
+}
+
+# Define all seven scenarios
+scenario_specs <- list(
+
+  lake_area = list(
+    raw = "lake_area_ha",
+    scaled = "scaled_log_area",
+    transform = "log",
+    mean = lake_scalers$mean_log_area,
+    sd = lake_scalers$sd_log_area,
+    values = exp(get_range(log(lake_base$lake_area_ha)))
+  ),
+
+  wetwood = list(
+    raw = "nlcd_wetwood90_pct",
+    scaled = "scaled_logit_wetwood",
+    transform = "logit",
+    mean = lake_scalers$mean_logit_wetwood,
+    sd = lake_scalers$sd_logit_wetwood,
+    values = c(0.001, 1, 2, 3, 4, 5, seq(10, 70, by = 5))
+  ),
+
+  wetemerge = list(
+    raw = "nlcd_wetemerg95_pct",
+    scaled = "scaled_logit_wetemerge",
+    transform = "logit",
+    mean = lake_scalers$mean_logit_wetemerge,
+    sd = lake_scalers$sd_logit_wetemerge,
+    values = get_pct_range(lake_base$nlcd_wetemerg95_pct)
+  ),
+
+  formix = list(
+    raw = "nlcd_formix43_pct",
+    scaled = "scaled_logit_formix",
+    transform = "logit",
+    mean = lake_scalers$mean_logit_formix,
+    sd = lake_scalers$sd_logit_formix,
+    values = get_pct_range(lake_base$nlcd_formix43_pct)
+  ),
+
+  forcon = list(
+    raw = "nlcd_forcon42_pct",
+    scaled = "scaled_logit_forcon",
+    transform = "logit",
+    mean = lake_scalers$mean_logit_forcon,
+    sd = lake_scalers$sd_logit_forcon,
+    values = get_pct_range(lake_base$nlcd_forcon42_pct)
+  ),
+
+  fordec = list(
+    raw = "nlcd_fordec41_pct",
+    scaled = "scaled_logit_fordec",
+    transform = "logit",
+    mean = lake_scalers$mean_logit_fordec,
+    sd = lake_scalers$sd_logit_fordec,
+    values = get_pct_range(lake_base$nlcd_fordec41_pct)
+  ),
+
+  watershed_ratio = list(
+    raw = "watershed_lake_area_ratio",
+    scaled = "scaled_log_ws_area_ratio",
+    transform = "log",
+    mean = lake_scalers$mean_lw_ratio,
+    sd = lake_scalers$sd_lw_ratio,
+    values = exp(get_range(log(lake_base$watershed_lake_area_ratio)))
+  )
+)
+
+make_scenarios <- function(data, spec) {
+
+  data %>%
+    crossing(scenario_value = spec$values) %>%
+    mutate(
+      "{spec$raw}" := scenario_value,
+
+      "{spec$scaled}" := (
+        if (spec$transform == "log") {
+          log(scenario_value)
+        } else {
+          qlogis(scenario_value / 100)
+        } - spec$mean
+      ) / spec$sd
+    ) %>%
+    mutate(
+      species = "walleye",
+      length = 15
+    ) %>%
+    left_join(walleye_scaler, by = character()) %>%
+    mutate(
+      scaled_length = (length - length_mean) / length_sd
+    )
+}
+
+run_scenario_analysis <- function(data, spec, fit,
+                                  ndraws = 500) {
+
+  # Generate scenarios
+  scenarios <- make_scenarios(data, spec)
+
+  # Generate expected Hg predictions
+  preds <- scenarios %>%
+    add_epred_draws(
+      fit,
+      ndraws = ndraws,
+      allow_new_levels = TRUE
+    )
+
+  # Individual lake summaries
+  lake_summary <- preds %>%
+    ungroup() %>%
+    group_by(.row, lagos_id, scenario_value) %>%
+    summarise(
+      median_hg = median(exp(.epred), na.rm = TRUE),
+      lower_hg = quantile(exp(.epred), 0.025, na.rm = TRUE),
+      upper_hg = quantile(exp(.epred), 0.975, na.rm = TRUE),
+
+      p_above_022 = mean(exp(.epred) > 0.22, na.rm = TRUE),
+      p_above_095 = mean(exp(.epred) > 0.95, na.rm = TRUE),
+
+      .groups = "drop"
+    )
+
+  # Regional summaries, calculated separately for each draw
+  draw_summary <- preds %>%
+    ungroup() %>%
+    group_by(scenario_value, .draw) %>%
+    summarise(
+      mean_hg = mean(exp(.epred), na.rm = TRUE),
+      median_hg = median(exp(.epred), na.rm = TRUE),
+
+      pct_low = mean(exp(.epred) < 0.22, na.rm = TRUE) * 100,
+
+      pct_medium = mean(
+        exp(.epred) >= 0.22 & exp(.epred) <= 0.95,
+        na.rm = TRUE
+      ) * 100,
+
+      pct_high = mean(exp(.epred) > 0.95, na.rm = TRUE) * 100,
+
+      .groups = "drop"
+    )
+
+  # Summarize across posterior draws
+  regional_summary <- draw_summary %>%
+    group_by(scenario_value) %>%
+    summarise(
+      mean_hg_med = median(mean_hg),
+      mean_hg_lo = quantile(mean_hg, 0.025),
+      mean_hg_hi = quantile(mean_hg, 0.975),
+
+      low_med = median(pct_low),
+      low_lo = quantile(pct_low, 0.025),
+      low_hi = quantile(pct_low, 0.975),
+
+      medium_med = median(pct_medium),
+      medium_lo = quantile(pct_medium, 0.025),
+      medium_hi = quantile(pct_medium, 0.975),
+
+      high_med = median(pct_high),
+      high_lo = quantile(pct_high, 0.025),
+      high_hi = quantile(pct_high, 0.975),
+
+      .groups = "drop"
+    )
+
+  # Return all outputs
+  list(
+    scenarios = scenarios,
+    lake_summary = lake_summary,
+    draw_summary = draw_summary,
+    regional_summary = regional_summary
+  )
+}
+
+all_results <- imap(
+  scenario_specs,
+  function(spec, name) {
+
+    message("Running scenario: ", name)
+
+    run_scenario_analysis(
+      data = lake_base,
+      spec = spec,
+      fit = fit,
+      ndraws = 200
+    )
+  }
+)
+
+rm(fit)
+
+#we can access woody wetland output like this 
+all_results$wetwood$scenarios
+all_results$wetwood$lake_summary
+all_results$wetwood$draw_summary
+all_results$wetwood$regional_summary
+
+#all region and lake summaries combined
+all_regional <- imap_dfr(
+  all_results,
+  ~ mutate(
+    .x$regional_summary,
+    covariate = .y
+  )
+)
+
+all_lakes <- imap_dfr(
+  all_results,
+  ~ mutate(
+    .x$lake_summary,
+    covariate = .y
+  )
+)
+
+#######################plots##############################################
+plot_regional_hg <- function(data, covariate_name) {
+
+  ggplot(data, aes(x = scenario_value, y = mean_hg_med)) +
+
+    geom_ribbon(
+      aes(ymin = mean_hg_lo, ymax = mean_hg_hi),
+      alpha = 0.2
+    ) +
+
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 2) +
+    geom_hline(yintercept = 0.22,linetype = "dashed") +
+
+    labs(
+      title = paste("Effect of", covariate_name),
+      x = covariate_name,
+      y = "Mean predicted walleye Hg (ppm)"
+    ) +
+
+    theme_classic()
+}
+
+regional_plots <- imap(
+  all_results,
+  ~ plot_regional_hg(
+    .x$regional_summary,
+    .y
+  )
+)
+
+all_covariate_plot <- wrap_plots(
+  regional_plots,
+  ncol = 3
+)
+all_covariate_plot
+
+ggsave(
+  "all_covariate_responses.jpg",
+  all_covariate_plot,
+  width = 11,
+  height = 7,
+  dpi = 300
+)
+###########################################################
+
+plot_regional_categories <- function(data, covariate_name) {
+
+  category_data <- data %>%
+    select(
+      scenario_value,
+      low_med, low_lo, low_hi,
+      medium_med, medium_lo, medium_hi,
+      high_med, high_lo, high_hi
+    ) %>%
+    pivot_longer(
+      cols = -scenario_value,
+      names_to = c("category", ".value"),
+      names_pattern = "(low|medium|high)_(med|lo|hi)"
+    ) %>%
+    mutate(
+      category = factor(
+        category,
+        levels = c("low", "medium", "high"),
+        labels = c(
+          "Below 0.22 ppm",
+          "0.22–0.95 ppm",
+          "Above 0.95 ppm"
+        )
+      )
+    )
+
+  ggplot(
+    category_data,
+    aes(
+      x = scenario_value,
+      y = med,
+      color = category,
+      fill = category
+    )
+  ) +
+
+    geom_ribbon(
+      aes(ymin = lo, ymax = hi),
+      alpha = 0.15,
+      color = NA
+    ) +
+
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 2) +
+
+    scale_color_manual(values = c(
+      "Below 0.22 ppm" = "#29975B",
+      "0.22–0.95 ppm" = "#D9A51B",
+      "Above 0.95 ppm" = "#C74747"
+    )) +
+
+    scale_fill_manual(values = c(
+      "Below 0.22 ppm" = "#29975B",
+      "0.22–0.95 ppm" = "#D9A51B",
+      "Above 0.95 ppm" = "#C74747"
+    )) +
+
+    scale_y_continuous(
+      limits = c(0, 100)
+    ) +
+
+    labs(
+      title = covariate_name,
+      x = covariate_name,
+      y = "Lakes in mercury category (%)",
+      color = "Mercury category",
+      fill = "Mercury category"
+    ) +
+
+    theme_classic() +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+category_plots <- imap(
+  all_results,
+  ~ plot_regional_categories(
+    .x$regional_summary,
+    .y
+  )
+)
+
+all_category_plots <- wrap_plots(
+  category_plots,
+  ncol = 3,
+  guides = "collect"
+) &
+  theme(legend.position = "bottom")
+all_category_plots
+
+ggsave(
+  "all_covariate_mercury_categories.jpg",
+  all_category_plots,
+  width = 11,
+  height = 7,
+  dpi = 300,
+  bg = "white"
+)
+
+###################example lakes##################################
+example_lakes <- lake_base %>%
+  filter(lagos_id %in% c(131, 1414, 2554)) %>% 
+  distinct(lagos_id) %>%
+  pull(lagos_id)
+
+# Pull lake-level results
+example_data <- all_results$wetwood$lake_summary %>%
+  filter(lagos_id %in% example_lakes) %>%
+  mutate(lake = factor(lagos_id))
+
+# Plot 1: Predicted mercury concentration
+p_hg <- ggplot(
+  example_data,
+  aes(
+    x = scenario_value,
+    y = median_hg
+  )
+) +
+  geom_ribbon(
+    aes(ymin = lower_hg, ymax = upper_hg),
+    alpha = 0.2,
+    fill = "steelblue"
+  ) +
+  geom_line(linewidth = 1.1, color = "steelblue") +
+  geom_point(size = 2, color = "steelblue") +
+  geom_hline(
+    yintercept = c(0.22, 0.95),
+    linetype = "dashed",
+    color = "grey40"
+  ) +
+  facet_wrap(~lake, ncol = 3) +
+  labs(
+    x = "Woody wetland cover (%)",
+    y = "Predicted Hg (ppm)"
+  ) +
+  theme_bw() +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+
+probability_data <- example_data %>%
+  select(
+    lagos_id,
+    lake,
+    scenario_value,
+    p_above_022,
+    p_above_095
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(p_above_022, p_above_095),
+    names_to = "threshold",
+    values_to = "probability"
+  ) %>%
+  mutate(
+    probability = probability * 100,
+    threshold = case_when(threshold == "p_above_022" ~ "Above 0.22 ppm",
+                          threshold == "p_above_095" ~ "Above 0.95 ppm"
+    )
+  )
+
+# Plot 2: Probability of exceeding mercury thresholds, faceted by lake
+p_probability <- ggplot(
+  probability_data,
+  aes(
+    x = scenario_value,
+    y = probability,
+    color = threshold,
+    group = threshold
+  )
+) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 1.8) +
+  scale_color_manual(
+    values = c(
+      "Above 0.22 ppm" = "#29975B",
+      "Above 0.95 ppm" = "#C74747"
+    )
+  ) +
+  scale_y_continuous(limits = c(0, 100)) +
+  facet_wrap(~lake, ncol = 3) +
+  labs(
+    x = "Woody wetland cover (%)",
+    y = "Probability of exceedance (%)",
+    color = "Threshold"
+  ) +
+  theme_bw() +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+# Combine side by side
+final <- p_hg / p_probability +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+final
+#ggsave("indi_lakes_probs.jpg", final, height = 7, width = 11)
+```
+
+
+
+
+
+
+
+
 # predicitons at the lake-species level - ignores fish level variation 
 ## Confusion Matrix
 Lets compare how well we predict the observed mean within a species-lake:
@@ -884,6 +1781,43 @@ Lets compare how well we predict the observed mean within a species-lake:
 2. from the predicted values, calculate the mean of value of each spec-lake. This would mean averaging across species, lake, .draw. (grouping by draw gets us each observation within lake-species and thus a mean mercury value for the grouping) - we will get 500 draws of each mean
 3. compare the observed mean to the predicted mean
 ```{r}
+#first I am walking through what this is
+predictions %>% 
+  filter(lagos_id %in% c("79", "3859", "69333")) %>% 
+  mutate(
+    hg = exp(.prediction),
+  ) %>% 
+  ggplot(aes(x = length_in, y = hg)) +
+  geom_point(aes(color = species)
+  ) +
+  facet_wrap(~lagos_id) +
+  labs(
+    x = "Fish length (in)",
+    y = "Predicted Hg concentration (ppm)",
+    color = "Species"
+  ) +
+  theme_bw()
+#ggsave("fish_level_preds.jpg")
+
+predictions %>% 
+  filter(lagos_id %in% c("79", "3859", "69333")) %>%
+  glimpse()
+  left_join(lake_species_preds, lake_species_obs, by = c("lagos_id", "species"))
+
+#here we get lake-species level posterior means for loos
+lake_species_preds_post <- predictions %>% 
+  group_by(lagos_id, species, .draw) %>% 
+  summarise(mean_pred = mean(exp(.prediction)))
+# 705 unique lake-species in loo, 500 post draws = 352500 values of means, lets viz a few means
+
+lake_species_preds_post %>% 
+  filter(lagos_id %in% c("79", "3859", "69333")) %>% 
+  ggplot() +
+  geom_density(aes(mean_pred, fill = species), alpha = .3) +
+  facet_wrap(~lagos_id)
+#ggsave("lake_spec_avg.jpg")
+# shows the posterior for any given lake-species, we take the median_qi to compare to observed mean
+
 # we group by .draw here so that we get an average of all fish in a lake-spec within a draw
 #we essentially get 500 estimates of each lake-spec average value across all lengths
 #lets do this on the back transformed scale 
@@ -898,6 +1832,7 @@ lake_species_preds <- predictions %>%
          -.interval) %>% 
   mutate(lagos_id = as.character(lagos_id))
 
+
 lake_species_obs <- left_out_scaled %>% 
   group_by(lagos_id, species) %>% 
   summarise(mean_obs = mean(hg_ppm))
@@ -905,6 +1840,54 @@ lake_species_obs <- left_out_scaled %>%
 lake_species_compare <- left_join(lake_species_preds, lake_species_obs, by = c("lagos_id", "species"))
 rm(lake_species_preds, lake_species_obs)
 
+lake_species_compare %>% 
+  filter(lagos_id %in% c("79", "3859", "69333")) %>% 
+  ggplot(
+  aes(y = species, color = species)
+) +
+  geom_errorbar(
+    aes(
+      x = mean_pred,
+      xmin = .lower,
+      xmax = .upper
+    ),
+    orientation = "y",
+    width = 0.2,
+    linewidth = 0.7
+  ) +
+  geom_point(
+    aes(x = mean_pred),
+    size = 2.5
+  ) +
+  geom_point(
+    aes(x = mean_obs),
+    shape = 4,
+    size = 3,
+    stroke = 1.1
+  ) +
+  facet_wrap(~lagos_id) +
+  labs(
+    x = "Mean Hg concentration (ppm)",
+    y = "Species",
+    color = "Species",
+    title = "Observed vs. predicted mean Hg by lake and species",
+    subtitle = "Colored dots and intervals = predicted mean and 95% credible interval; × = observed mean"
+  ) +
+  geom_vline(xintercept = 0.22) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 8)
+  )
+#ggsave("average_comparison.jpg")
+
+left_out_scaled %>% 
+  filter(lagos_id == "79") %>% 
+  glimpse()
+lake_species_compare %>% 
+  filter(lagos_id == "79") %>% 
+  glimpse()
 
 lake_species_metrics <- lake_species_compare %>%
   mutate(
